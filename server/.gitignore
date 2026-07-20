@@ -1,0 +1,5 @@
+.env
+*.env
+node_modules/
+backup.sql
+server/src/config/firebase-service-account.json

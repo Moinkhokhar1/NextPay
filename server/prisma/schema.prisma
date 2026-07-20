@@ -1,0 +1,97 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(uuid())
+  name          String
+  email         String   @unique
+  password      String
+  phone         String?  @unique
+  public_key    String?
+  sms_secret_key  String?
+  created_at    DateTime @default(now())
+
+  wallet Wallet?
+  transactions_sent     Transaction[] @relation("sentTransactions")
+  transactions_received Transaction[] @relation("receivedTransactions")
+
+  bankAccount  BankAccount?
+  withdrawals  Withdrawal[]
+}
+
+model Wallet {
+  id             String   @id @default(uuid())
+  user_id        String   @unique
+  balance        Decimal  @default(0) @db.Decimal(12, 2)
+  locked_balance Float    @default(0)
+  updated_at     DateTime @updatedAt
+
+  user User @relation(fields: [user_id], references: [id])
+}
+
+model Transaction {
+  id          String   @id @default(uuid())
+  sender_id   String
+  receiver_id String
+  amount      Float
+  status      String
+  nonce       BigInt
+  signature   String
+  note        String?
+  is_offline  Boolean  @default(true)
+  created_at  DateTime @default(now())
+
+  sender   User @relation("sentTransactions", fields: [sender_id], references: [id])
+  receiver User @relation("receivedTransactions", fields: [receiver_id], references: [id])
+}
+
+model SyncLog {
+  id             String   @id @default(uuid())
+  transaction_id String
+  sync_status    String
+  attempts       Int      @default(0)
+  updated_at     DateTime @updatedAt
+}
+model BankAccount {
+  id                 String   @id @default(uuid())
+  user_id            String   @unique
+  accountNumber      String
+  ifscCode           String
+  accountHolderName  String
+  createdAt          DateTime @default(now())
+
+  user               User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("bank_accounts")
+}
+
+model Withdrawal {
+  id          String    @id @default(uuid())
+  user_id     String
+  amount      Float
+  status      String    @default("pending") // pending | processing | success | failed
+  createdAt   DateTime  @default(now())
+  processedAt DateTime?
+
+  user        User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("withdrawals")
+}
+
+model Otp {
+  id         String   @id @default(uuid())
+  phone      String
+  code       String
+  attempts   Int      @default(0)
+  expires_at DateTime
+  created_at DateTime @default(now())
+
+  @@index([phone])
+  @@map("otps")
+}
