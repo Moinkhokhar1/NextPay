@@ -56,7 +56,6 @@ class NetworkMonitor {
     }
   }
 
-  // Actually tries to connect to Google DNS — much more reliable than connectivity_plus
   Future<bool> _hasRealInternet() async {
     try {
       final result = await InternetAddress.lookup('google.com')

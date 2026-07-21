@@ -4,8 +4,8 @@ import 'storage_service.dart';
 class ApiService {
   static final Dio _dio = Dio(
     BaseOptions(
-      baseUrl: "http://172.20.10.4:8000/api", //physical device
-      //  baseUrl: "http://10.0.8.197:8000/api",  //emulator device
+      // baseUrl: "http://172.20.10.4:8000/api", //physical device
+       baseUrl: "http://10.0.1.211:8000/api",  //emulator device
       // ipconfig getifaddr en0
       connectTimeout: const Duration(seconds: 10),
       receiveTimeout: const Duration(seconds: 10),
