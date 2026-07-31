@@ -1,4 +1,4 @@
-# 📱 NextPay — Flutter
+<!-- # 📱 NextPay — Flutter
 
 > **Offline-first payment app built with Flutter. Send money without internet, sync when connected.**
 
@@ -242,5 +242,374 @@ This project is **not open source**. No part of this codebase may be copied, mod
 **Built with ❤️ by Moinworksonlocalhost**
 
 *Making payments accessible everywhere, even without internet*
+
+</div> -->
+<div align="center">
+
+# ⚡ NextPay
+
+### Offline-First Payments. No Internet Required.
+
+**Send money over SMS. Sync automatically. Never lose a transaction.**
+
+[![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?style=for-the-badge&logo=flutter&logoColor=white)](https://flutter.dev)
+[![Node.js](https://img.shields.io/badge/Node.js-Express-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org)
+[![Prisma](https://img.shields.io/badge/Prisma-PostgreSQL-2D3748?style=for-the-badge&logo=prisma&logoColor=white)](https://www.prisma.io/)
+[![Twilio](https://img.shields.io/badge/Twilio-SMS_Gateway-F22F46?style=for-the-badge&logo=twilio&logoColor=white)](https://www.twilio.com/)
+[![License](https://img.shields.io/badge/License-Proprietary-red?style=for-the-badge)](#-license)
+
+<img src="screenshots/home.png" width="200"/> <img src="screenshots/sendmoney.png" width="200"/> <img src="screenshots/qrscan.png" width="200"/> <img src="screenshots/history.png" width="200"/>
+
+</div>
+
+---
+
+## 💡 What is NextPay?
+
+**NextPay** is a full-stack digital wallet ecosystem built for places where the network drops out but the money still needs to move. A user can send funds with **zero internet connection** — the transaction is cryptographically signed and queued locally, then automatically synced the moment connectivity returns. For truly offline scenarios, an **SMS gateway** lets transfers happen over plain text messages, no data plan needed at all.
+
+It's not just an app — it's four coordinated services working together:
+
+| Service | What it does | Stack |
+|---|---|---|
+| 📱 **`nextpay/`** | The mobile wallet — send, receive, scan, sync | Flutter · Dart |
+| 🖥️ **`server/`** | Core API — auth, wallets, transactions, withdrawals | Node.js · Express · Prisma · PostgreSQL |
+| 📡 **`gateway/`** | SMS-based payment gateway | Node.js · Twilio · HMAC |
+| 🔊 **`soundbox-app/`** | Merchant companion — announces payments aloud | Expo · React Native |
+
+---
+
+## 🧭 Table of Contents
+
+- [Why NextPay](#-why-nextpay)
+- [Architecture](#-architecture)
+- [Core Features](#-core-features)
+- [Tech Stack](#️-tech-stack)
+- [Getting Started](#-getting-started)
+- [How Offline Sync Works](#-how-offline-sync-works)
+- [SMS Payment Flow](#-sms-payment-flow)
+- [Security Model](#-security-model)
+- [Data Model](#️-data-model)
+- [Screenshots](#-screenshots)
+- [Roadmap](#-roadmap)
+- [Contributing](#-contributing)
+- [License](#-license)
+
+---
+
+## 🎯 Why NextPay
+
+Traditional payment apps assume you always have a connection. NextPay doesn't.
+
+- 🌐 **No signal? No problem.** Transactions are signed and stored on-device, then synced when the network returns.
+- 📴 **True SMS fallback.** No data plan at all? Send `PAY#` over text and the gateway handles the rest.
+- 🔐 **Tamper-proof by design.** Every offline transaction carries a SHA-256/HMAC signature the backend verifies before it ever touches a balance.
+- 🔊 **Audible confirmations.** Merchants get a spoken payment announcement via the SoundBox companion app — Hindi & English.
+- ⚡ **Instant when online, resilient when not.** The same wallet, the same balance, the same experience — either way.
+
+---
+
+## 🏗️ Architecture
+
+```
+                        ┌───────────────────────┐
+                        │   NextPay Mobile App   │
+                        │   (Flutter · Dart)     │
+                        └──────────┬────────────┘
+                                   │ REST (Dio)
+                     ┌─────────────┼─────────────┐
+                     │                           │
+            ┌────────▼────────┐        ┌─────────▼─────────┐
+            │   Core Server    │◄──────►│   SMS Gateway      │
+            │ Express · Prisma │  HTTP  │ Express · Twilio   │
+            │   PostgreSQL     │        │  HMAC-verified     │
+            └────────┬─────────┘        └─────────┬─────────┘
+                     │                             │
+                     │                     ┌────────▼────────┐
+                     │                     │   Twilio SMS     │
+                     │                     │  "PAY#..." texts │
+                     │                     └─────────────────┘
+                     │
+            ┌────────▼─────────┐
+            │  SoundBox App     │
+            │ Expo · TTS polling│
+            │ 🔊 "Payment of    │
+            │    ₹500 received" │
+            └───────────────────┘
+```
+
+---
+
+## ✨ Core Features
+
+### 💳 Wallet & Payments
+- Real-time balance with **locked vs. available** split
+- Send to any user via ID or **QR scan**
+- Quick-amount chips for fast transfers
+- Animated success states with haptic feedback
+
+### 📴 Offline Engine
+- Transactions signed with **SHA-256** and stored locally
+- Balance auto-locks while offline to prevent overspending
+- Pending queue with manual or automatic sync
+- `NetworkMonitor` triggers sync the instant connectivity returns
+
+### 📡 SMS Gateway
+- Twilio webhook parses `PAY#` formatted messages
+- HMAC signature validation before any funds move
+- Confirmation SMS sent to both sender and receiver
+- Nonce tracking to block replay attacks
+
+### 🔊 SoundBox Companion
+- Polls the backend for incoming payments
+- Announces amount + sender via text-to-speech
+- Bilingual: Hindi & English
+
+### 📜 History & Profile
+- Combined online/offline transaction ledger with status badges
+- Shareable QR code for receiving payments
+- Bank account linking & withdrawal requests
+
+---
+
+## 🛠️ Tech Stack
+
+<table>
+<tr>
+<td valign="top" width="25%">
+
+**Mobile (`nextpay/`)**
+- Flutter / Dart
+- Provider
+- Dio
+- SharedPreferences
+- `crypto` (SHA-256)
+- qr_flutter · mobile_scanner
+- flutter_tts
+- connectivity_plus
+
+</td>
+<td valign="top" width="25%">
+
+**Backend (`server/`)**
+- Node.js · Express 5
+- Prisma ORM
+- PostgreSQL
+- JWT auth
+- bcrypt
+- Firebase Admin
+- Twilio (OTP)
+
+</td>
+<td valign="top" width="25%">
+
+**SMS Gateway (`gateway/`)**
+- Node.js · Express
+- Twilio SDK
+- HMAC (crypto)
+- Axios
+- dotenv
+
+</td>
+<td valign="top" width="25%">
+
+**SoundBox (`soundbox-app/`)**
+- Expo / React Native
+- expo-router
+- expo-speech (TTS)
+- expo-haptics
+- TypeScript
+
+</td>
+</tr>
+</table>
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+- Flutter SDK 3.x+ & Dart 3.x+
+- Node.js 18+ and npm
+- PostgreSQL instance
+- Twilio account (for SMS gateway)
+- Android Studio / Xcode (for mobile builds)
+
+### 1. Clone the repo
+```bash
+git clone https://github.com/Moinkhokhar1/NextPay.git
+cd NextPay
+```
+
+### 2. Set up the backend server
+```bash
+cd server
+npm install
+cp .env.example .env   # add DATABASE_URL, JWT_SECRET, etc.
+npx prisma migrate dev
+npm run dev
+```
+
+### 3. Set up the SMS gateway (optional)
+```bash
+cd gateway
+npm install
+cp .env.example .env   # add TWILIO_* keys + BACKEND_API_URL
+npm run dev
+```
+
+### 4. Run the mobile app
+```bash
+cd nextpay
+flutter pub get
+```
+Point it at your backend in `lib/services/api_service.dart`:
+```dart
+// Android emulator
+static const String baseUrl = "http://10.0.2.2:8000/api";
+// Physical device
+static const String baseUrl = "http://192.168.x.x:8000/api";
+```
+```bash
+flutter run
+```
+
+### 5. Run the SoundBox companion (optional)
+```bash
+cd soundbox-app
+npm install
+npx expo start
+```
+
+---
+
+## 🔄 How Offline Sync Works
+
+```
+ User sends payment (no internet)
+             │
+             ▼
+ Balance locked locally (SharedPreferences)
+             │
+             ▼
+ Transaction signed with SHA-256
+             │
+             ▼
+ Saved to pending_transactions_{userId}
+             │
+             ▼
+ Internet restored → NetworkMonitor detects change
+             │
+             ▼
+ Auto-sync: POST /sync/transactions
+             │
+             ▼
+ Server verifies signature
+             │
+             ▼
+ Balance updated · receiver funded · local queue cleared
+```
+
+## 📟 SMS Payment Flow
+
+```
+ Sender texts:  PAY#<receiverPhone>#<amount>#<nonce>
+             │
+             ▼
+ Twilio webhook → gateway.js  (/sms/incoming)
+             │
+             ▼
+ HMAC signature validated · nonce checked for replay
+             │
+             ▼
+ Gateway calls backend API to execute transfer
+             │
+             ▼
+ Confirmation SMS sent to sender & receiver
+```
+
+---
+
+## 🔐 Security Model
+
+Every offline transaction is signed **before** it ever leaves the device:
+
+```dart
+final payload = {
+  'txId': uuid,
+  'sender': senderId,
+  'receiver': receiverId,
+  'amount': amount,
+  'timestamp': timestamp,
+  'nonce': nonce,
+  'status': 'pending',
+  'synced': false,
+};
+final signature = sha256(jsonEncode(payload) + SECRET_KEY);
+```
+
+- ✅ Backend independently re-verifies every signature before crediting a balance
+- ✅ Nonces prevent replay of the same transaction twice
+- ✅ SMS gateway messages are HMAC-authenticated end-to-end
+- ✅ Passwords hashed with `bcrypt`; sessions secured with JWT
+
+---
+
+## 🗄️ Data Model
+
+The core server persists everything through Prisma into PostgreSQL:
+
+| Model | Purpose |
+|---|---|
+| `User` | Identity, credentials, public key, SMS secret |
+| `Wallet` | Balance & locked balance per user |
+| `Transaction` | Signed transfer record (online/offline flag) |
+| `SyncLog` | Tracks retry attempts for pending syncs |
+| `BankAccount` | Linked bank details for withdrawals |
+| `Withdrawal` | Withdrawal request lifecycle |
+| `Otp` | Phone verification codes |
+
+---
+
+## 📱 Screenshots
+
+| Login | Home | Send Money | QR Scanner |
+|:---:|:---:|:---:|:---:|
+| ![Login](screenshots/login.png) | ![Home](screenshots/home.png) | ![Send](screenshots/sendmoney.png) | ![QR](screenshots/qrscan.png) |
+
+| Pending Queue | History | Transaction Detail | Profile |
+|:---:|:---:|:---:|:---:|
+| ![Pending](screenshots/pending.png) | ![History](screenshots/history.png) | ![Detail](screenshots/txdetail.PNG) | ![Profile](screenshots/profile.png) |
+
+---
+
+## 🗺️ Roadmap
+
+- [ ] QR-based offline confirmation modal
+- [ ] Bluetooth fallback for SoundBox announcements (custom dev build)
+- [ ] iOS 26 simulator support (currently arm64 plugin issue — use physical device)
+- [ ] Redis-backed nonce store for the SMS gateway (currently in-memory)
+
+---
+
+## 🤝 Contributing
+
+Pull requests are welcome! For major changes, please open an issue first to discuss what you'd like to change.
+
+---
+
+## 📄 License
+
+© 2026 moinworksonlocalhost. All rights reserved.
+
+This project is **not open source**. No part of this codebase may be copied, modified, distributed, or used without explicit written permission from the author.
+
+---
+
+<div align="center">
+
+**Built with ❤️ by Moinworksonlocalhost**
+
+*Making payments accessible everywhere — even without a single bar of signal.*
 
 </div>
