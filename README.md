@@ -608,7 +608,7 @@ This project is **not open source**. No part of this codebase may be copied, mod
 
 <div align="center">
 
-**Built with ❤️ by Moinworksonlocalhost**
+**Built with ❤️ by (https://moinworksonlocalhost.onrender.com/)Moinworksonlocalhost**
 
 *Making payments accessible everywhere — even without a single bar of signal.*
 
