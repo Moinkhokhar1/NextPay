@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:intl/intl.dart';
 import 'dart:async';
 import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
@@ -41,13 +42,17 @@ class _HomeScreenState extends State<HomeScreen> {
   List<WalletTransaction> _recentTx = [];
   bool _txLoading = true;
 
+  // Wallet/profile (balance card + greeting) initial-load state.
+  bool _walletLoading = true;
+
   @override
   void initState() {
     super.initState();
     _loadProfileImage();
     _loadRecentTransactions();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<AuthProvider>().fetchWallet();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await context.read<AuthProvider>().fetchWallet();
+      if (mounted) setState(() => _walletLoading = false);
     });
     _connSub = Connectivity().onConnectivityChanged.listen((results) {
       final online = results.any((r) => r != ConnectivityResult.none);
@@ -146,6 +151,14 @@ class _HomeScreenState extends State<HomeScreen> {
     final results = await Connectivity().checkConnectivity();
     final online = results.any((r) => r != ConnectivityResult.none);
 
+    // Show skeletons again while the refresh is in flight.
+    if (mounted) {
+      setState(() {
+        _walletLoading = true;
+        _txLoading = true;
+      });
+    }
+
     await Future.wait([
       auth.fetchWallet(),
       _loadProfileImage(),
@@ -154,7 +167,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
     _peopleRowKey.currentState?.refresh();
 
-    if (mounted) setState(() => _isOnline = online);
+    if (mounted) {
+      setState(() {
+        _isOnline = online;
+        _walletLoading = false;
+      });
+    }
   }
 
   Future<void> _handleSync() async {
@@ -294,7 +312,19 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                       const SizedBox(width: 12),
-                      Column(
+                      _walletLoading
+                          ? _ShimmerWrapper(
+                        c: c,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _skeletonBox(width: 60, height: 11),
+                            const SizedBox(height: 6),
+                            _skeletonBox(width: 110, height: 15),
+                          ],
+                        ),
+                      )
+                          : Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text("Good day",
@@ -383,7 +413,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Column(
                     children: [
                       // ── BALANCE CARD ───────────────────────────────────
-                      Container(
+                      _walletLoading
+                          ? _balanceCardSkeleton(c)
+                          : Container(
                         margin: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                         padding: const EdgeInsets.all(22),
                         decoration: BoxDecoration(
@@ -571,9 +603,68 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ─────────────────────────────────────────────────────────
+  // Balance card skeleton — same size/shape as the real card,
+  // filled with shimmering placeholder blocks.
+  // ─────────────────────────────────────────────────────────
+  Widget _balanceCardSkeleton(AppColors c) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: c.purpleLight,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: _ShimmerWrapper(
+        c: c,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                _skeletonBox(width: 110, height: 12),
+                _skeletonBox(width: 18, height: 18, radius: 9),
+              ],
+            ),
+            const SizedBox(height: 10),
+            _skeletonBox(width: 160, height: 34),
+            Container(
+              height: 1,
+              margin: const EdgeInsets.symmetric(vertical: 16),
+              color: c.purple.withOpacity(0.1),
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _skeletonBox(width: 40, height: 11),
+                    const SizedBox(height: 6),
+                    _skeletonBox(width: 70, height: 15),
+                  ],
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    _skeletonBox(width: 40, height: 11),
+                    const SizedBox(height: 6),
+                    _skeletonBox(width: 70, height: 15),
+                  ],
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────
   // Recent transactions card: header ("Recent Transactions" +
   // "View All" + a small sync affordance so the old menu's sync
-  // action isn't lost), a list of up to 5 rows, and an empty state.
+  // action isn't lost), a list of up to 5 rows, a skeleton
+  // loading state, and an empty state.
   // ─────────────────────────────────────────────────────────
   Widget _recentTransactionsSection(AppColors c, String? currentUserId) {
     final items = _recentTx;
@@ -589,7 +680,7 @@ class _HomeScreenState extends State<HomeScreen> {
               Padding(
                 padding: const EdgeInsets.only(left: 4),
                 child: Text(
-                  "Recent transactions",
+                  "Transactions",
                   style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
@@ -625,15 +716,17 @@ class _HomeScreenState extends State<HomeScreen> {
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: c.border, width: 1),
             ),
+            clipBehavior: Clip.antiAlias,
             child: _txLoading
-                ? const Padding(
-              padding: EdgeInsets.symmetric(vertical: 28),
-              child: Center(
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
+                ? _ShimmerWrapper(
+              c: c,
+              child: Column(
+                children: [
+                  for (int i = 0; i < 4; i++) ...[
+                    _skeletonTxRow(),
+                    if (i != 3) _menuDivider(c),
+                  ],
+                ],
               ),
             )
                 : items.isEmpty
@@ -674,6 +767,37 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _skeletonTxRow() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+      child: Row(
+        children: [
+          _skeletonBox(width: 40, height: 40, radius: 12),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _skeletonBox(width: 110, height: 13),
+                const SizedBox(height: 6),
+                _skeletonBox(width: 130, height: 11),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              _skeletonBox(width: 56, height: 13),
+              const SizedBox(height: 6),
+              _skeletonBox(width: 40, height: 11),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _txRow(AppColors c, WalletTransaction tx, {required bool isReceived}) {
     final iconBg = isReceived ? c.successBg : c.dangerBg;
     final iconColor = isReceived ? c.successText : c.dangerText;
@@ -689,6 +813,11 @@ class _HomeScreenState extends State<HomeScreen> {
         : (tx.receiverName.isNotEmpty && tx.receiverName != "Unknown"
         ? tx.receiverName
         : tx.receiverId);
+
+    // "Online/Offline • 26 Jul 2026, 07:49 pm" — mode + date/time,
+    // matching the reference design.
+    final modeAndTime =
+        "${tx.isOffline ? "Offline" : "Online"} • ${DateFormat("d MMM yyyy, h:mm a").format(tx.createdAt)}";
 
     return GestureDetector(
       onTap: () {
@@ -738,13 +867,16 @@ class _HomeScreenState extends State<HomeScreen> {
                           color: c.textPrimary)),
                   const SizedBox(height: 2),
                   Text(
-                    tx.isOffline ? "Offline" : "Online",
+                    modeAndTime,
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
                     style:
                     TextStyle(fontSize: 12, color: c.textSecondary),
                   ),
                 ],
               ),
             ),
+            const SizedBox(width: 10),
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
@@ -794,6 +926,83 @@ class _HomeScreenState extends State<HomeScreen> {
       height: 1,
       margin: const EdgeInsets.symmetric(horizontal: 16),
       color: c.border,
+    );
+  }
+}
+
+
+// ─────────────────────────────────────────────────────────
+// Generic skeleton block — a solid white rounded box. Colored
+// by whatever _ShimmerWrapper it's nested under.
+// ─────────────────────────────────────────────────────────
+Widget _skeletonBox({required double width, required double height, double radius = 4}) {
+  return Container(
+    width: width,
+    height: height,
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(radius),
+    ),
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// Wraps any skeleton content in a moving shimmer sweep. One
+// AnimationController per wrapped section (header, balance
+// card, transactions list) rather than per box, for cheap,
+// smooth animation.
+// ─────────────────────────────────────────────────────────
+class _ShimmerWrapper extends StatefulWidget {
+  final AppColors c;
+  final Widget child;
+  const _ShimmerWrapper({required this.c, required this.child});
+
+  @override
+  State<_ShimmerWrapper> createState() => _ShimmerWrapperState();
+}
+
+class _ShimmerWrapperState extends State<_ShimmerWrapper>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final baseColor = widget.c.border.withOpacity(0.55);
+    final highlightColor = widget.c.border.withOpacity(0.15);
+
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return ShaderMask(
+          blendMode: BlendMode.srcATop,
+          shaderCallback: (bounds) {
+            final t = _controller.value;
+            return LinearGradient(
+              colors: [baseColor, highlightColor, baseColor],
+              stops: const [0.0, 0.5, 1.0],
+              begin: Alignment(-1.0 - t * 2, 0),
+              end: Alignment(1.0 - t * 2, 0),
+            ).createShader(bounds);
+          },
+          child: child,
+        );
+      },
+      child: widget.child,
     );
   }
 }

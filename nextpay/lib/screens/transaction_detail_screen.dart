@@ -89,7 +89,7 @@ class TransactionDetailScreen extends StatelessWidget {
             ],
             const SizedBox(height: 30),
             Text(
-              "${isReceived ? '+' : '-'}₹${tx.amount.toStringAsFixed(0)}",
+              "₹${tx.amount.toStringAsFixed(0)}",
               style: TextStyle(
                 fontSize: 52,
                 fontWeight: FontWeight.bold,
