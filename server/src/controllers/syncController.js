@@ -9,7 +9,7 @@ const syncTransactions = async (req, res) => {
     const results = [];
 
     for (const tx of transactions) {
-      console.log("FULL TX:", JSON.stringify(tx, null, 2));
+      // console.log("FULL TX:", JSON.stringify(tx, null, 2));
 
       // Check duplicate tx
       const existingTx = await prisma.transaction.findUnique({ where: { id: tx.txId } });
