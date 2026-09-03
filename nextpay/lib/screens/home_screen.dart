@@ -255,8 +255,23 @@ class _HomeScreenState extends State<HomeScreen> {
     final user = auth.user;
 
     final balance = (user?.wallet?.balance ?? 0).toDouble();
+    final offlineBalance = (user?.wallet?.offlineBalance ?? 0).toDouble();
     final lockedBalance = (user?.wallet?.lockedBalance ?? 0).toDouble();
-    final availableBalance = (balance - lockedBalance).toStringAsFixed(2);
+
+    // FIX: Main "Available balance" is no longer reduced by lockedBalance.
+    // The money reserved for a pending offline payment was already moved
+    // out of `balance` into `offlineBalance` at recharge time — it should
+    // never be subtracted from `balance` again here. That double-counting
+    // was why the home screen appeared to dip your main balance during an
+    // offline payment and then "restore" it after sync.
+    final availableBalance = balance.toStringAsFixed(2);
+
+    // FIX: This is the figure that should actually move when you spend
+    // offline — the offline pool minus whatever is currently locked
+    // (reserved) against a pending, un-synced offline transaction.
+    final offlineAvailable =
+    (offlineBalance - lockedBalance).toStringAsFixed(2);
+
     final lockedBalanceDisplay = lockedBalance.toStringAsFixed(2);
     final totalBalance = balance.toStringAsFixed(2);
     final userName =
@@ -486,6 +501,33 @@ class _HomeScreenState extends State<HomeScreen> {
                                     ),
                                   ],
                                 ),
+                                // FIX: new "Offline" column — this is the
+                                // figure that actually moves when you make
+                                // an offline payment (locking a reservation
+                                // against the offline pool), instead of the
+                                // change being invisible until sync.
+                                if (offlineBalance > 0)
+                                  Column(
+                                    crossAxisAlignment:
+                                    CrossAxisAlignment.center,
+                                    children: [
+                                      Text("Offline",
+                                          style: TextStyle(
+                                              color: c.teal.withOpacity(
+                                                  0.85),
+                                              fontSize: 12)),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        _balanceVisible
+                                            ? "₹$offlineAvailable"
+                                            : "₹$mask",
+                                        style: TextStyle(
+                                            color: c.teal,
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w600),
+                                      ),
+                                    ],
+                                  ),
                                 if (lockedBalance > 0)
                                   Column(
                                     crossAxisAlignment:

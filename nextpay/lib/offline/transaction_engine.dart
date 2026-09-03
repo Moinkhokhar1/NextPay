@@ -13,10 +13,19 @@ import 'wallet_engine.dart';
 /// Mirrors offline/transactionEngine.js — SHA256 signing must match
 /// server/src/controllers/syncController.js exactly.
 ///
-/// IMPORTANT: the balance/lock check in WalletEngine is a client-side
-/// UX guard only. The server MUST independently re-derive the sender's
-/// real balance at sync time and reject anything that doesn't
-/// reconcile — never trust the client's claimed balance for settlement.
+/// IMPORTANT: the offline_balance/lock check in WalletEngine is a
+/// client-side UX guard only. The server MUST independently re-derive
+/// the sender's real offline_balance at sync time and reject anything
+/// that doesn't reconcile — never trust the client's claimed balance
+/// for settlement.
+///
+/// The spending ceiling here comes from WalletEngine, which checks
+/// against `offlineBalance` — real money the user explicitly moved out
+/// of their main balance via a server-side recharge (see
+/// rechargeOfflineWallet on the server, and the "Offline wallet" section
+/// in ProfileScreen on the client). That's what makes this a real fix
+/// rather than just a self-declared limit: the server already knows
+/// about and has debited that money before any offline spend happens.
 class TransactionEngine {
   final AuthProvider authProvider;
   final WalletEngine walletEngine;
@@ -61,7 +70,7 @@ class TransactionEngine {
     String? senderName,
   }) async {
     // Client-side UX guard only — NOT the source of truth. Server
-    // re-validates the real balance independently at sync time.
+    // re-validates the real offline_balance independently at sync time.
     final lockResult = await walletEngine.lockBalance(amount);
 
     if (lockResult["success"] != true) {

@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
-import 'home_screen.dart';
 import 'register_screen.dart';
+import 'gyre_otp_field.dart';
 import '../widgets/app_feedback.dart';
 
 // ── Design tokens (matches home_screen.dart) ───────────────────
@@ -16,7 +16,6 @@ const _border = Color(0xFFE9E7E1);
 
 const _purple = Color(0xFF534AB7);
 const _purpleDark = Color(0xFF26215C);
-const _purpleLight = Color(0xFFEEEDFE);
 
 const _otpLength = 6;
 const _resendSeconds = 30;
@@ -35,6 +34,8 @@ class _LoginScreenState extends State<LoginScreen> {
   List.generate(_otpLength, (_) => TextEditingController());
   final List<FocusNode> _otpFocusNodes =
   List.generate(_otpLength, (_) => FocusNode());
+
+  final GyreOtpController _gyre = GyreOtpController();
 
   bool _otpSent = false;
   bool _isLoading = false;
@@ -100,6 +101,7 @@ class _LoginScreenState extends State<LoginScreen> {
       for (final c in _otpControllers) {
         c.clear();
       }
+      _gyre.reset(); // clear any prior gyre animation state on (re)send
       setState(() => _otpSent = true);
       _startResendTimer();
       WidgetsBinding.instance
@@ -115,6 +117,8 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _handleVerifyOtp() async {
+    if (_isLoading) return; // gyre auto-submits on fill and the button both call this
+
     final phone = _phoneController.text.trim();
     final otp = _otpValue;
 
@@ -126,12 +130,23 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     final auth = context.read<AuthProvider>();
-    final result = await auth.loginWithOtp(_normalizePhone(phone), otp);
+    final result = await auth.loginWithOtp(
+      _normalizePhone(phone),
+      otp,
+      // Correct code: play the mint curl *before* the provider publishes the
+      // session. Committing user+token flips the auth gate in main.dart, which
+      // disposes this screen — so the animation has to finish first, not race
+      // the swap to HomeScreen.
+      beforeCommit: () => _gyre.playSuccess(),
+    );
 
     if (!mounted) return;
     setState(() => _isLoading = false);
 
     if (result["success"] != true) {
+      // Wrong code: flash red, shake flat, then clear right-to-left and refocus.
+      await _gyre.playError();
+      if (!mounted) return;
       _showAlert("Error", result["message"] ?? "Login failed");
     }
   }
@@ -145,23 +160,6 @@ class _LoginScreenState extends State<LoginScreen> {
         c.clear();
       }
     });
-  }
-
-  void _onOtpDigitChanged(int index, String value) {
-    if (value.isNotEmpty) {
-      if (index + 1 < _otpLength) {
-        _otpFocusNodes[index + 1].requestFocus();
-      } else {
-        _otpFocusNodes[index].unfocus();
-      }
-    } else {
-      if (index > 0) {
-        _otpFocusNodes[index - 1].requestFocus();
-      }
-    }
-    if (_otpValue.length == _otpLength) {
-      _handleVerifyOtp();
-    }
   }
 
   void _showAlert(String title, String message) {
@@ -364,9 +362,13 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ),
           const SizedBox(height: 32),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: List.generate(_otpLength, (i) => _otpBox(i)),
+          GyreOtpField(
+            length: _otpLength,
+            controllers: _otpControllers,
+            focusNodes: _otpFocusNodes,
+            controller: _gyre,
+            enabled: !_isLoading,
+            onCompleted: (_) => _handleVerifyOtp(),
           ),
           const SizedBox(height: 32),
           _primaryButton(
@@ -398,48 +400,6 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  Widget _otpBox(int index) {
-    final filled = _otpControllers[index].text.isNotEmpty;
-    return SizedBox(
-      width: 48,
-      height: 56,
-      child: TextField(
-        controller: _otpControllers[index],
-        focusNode: _otpFocusNodes[index],
-        textAlign: TextAlign.center,
-        keyboardType: TextInputType.number,
-        maxLength: 1,
-        enabled: !_isLoading,
-        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-        style: const TextStyle(
-            fontSize: 20, fontWeight: FontWeight.w700, color: _textPrimary),
-        decoration: InputDecoration(
-          counterText: "",
-          filled: true,
-          fillColor: _surface,
-          contentPadding: EdgeInsets.zero,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(
-                color: filled ? _purple : _border,
-                width: filled ? 1.5 : 1),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(
-                color: filled ? _purple : _border,
-                width: filled ? 1.5 : 1),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: _purple, width: 1.5),
-          ),
-        ),
-        onChanged: (v) => _onOtpDigitChanged(index, v),
-      ),
-    );
-  }
-
   String _formatSeconds(int s) {
     final m = (s ~/ 60).toString().padLeft(2, '0');
     final sec = (s % 60).toString().padLeft(2, '0');
@@ -457,7 +417,7 @@ class _LoginScreenState extends State<LoginScreen> {
       width: double.infinity,
       height: 56,
       decoration: BoxDecoration(
-        color: active ? _purple : _purple.withOpacity(0.4),
+        color: active ? _purple : _purple.withValues(alpha: 0.4),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Material(

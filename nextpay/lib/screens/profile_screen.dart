@@ -10,9 +10,12 @@ import 'package:path_provider/path_provider.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import '../services/offline_wallet_service.dart';
 import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
 import '../app_colors.dart';
+import '../models/wallet.dart';
+import '../services/offline_wallet_service.dart';
 import 'home_screen.dart';
 import 'scanner_screen.dart';
 
@@ -143,6 +146,216 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     if (!mounted) return;
     Navigator.of(context).popUntil((route) => route.isFirst);
+  }
+
+  // ── Offline wallet recharge ──────────────────────────────────────────
+
+  Future<void> _showOfflineWalletSheet(AppColors c) async {
+    final auth = context.read<AuthProvider>();
+    final wallet = auth.user?.wallet;
+    if (wallet == null) return;
+
+    final availableBalance =
+    (wallet.balance - wallet.lockedBalance).clamp(0, wallet.balance);
+    final controller = TextEditingController();
+    bool isSubmitting = false;
+
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: c.surface,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (sheetContext, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 20,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 36,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: c.border,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                  ),
+                  Text(
+                    "Offline wallet",
+                    style: TextStyle(
+                        fontSize: 17, fontWeight: FontWeight.w700, color: c.textPrimary),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    "Recharge it from your main balance to spend offline. "
+                        "This is a real transaction — the amount is debited "
+                        "from your balance right now, so it's never lost or "
+                        "duplicated even if this device is lost before you sync.",
+                    style: TextStyle(fontSize: 13, color: c.textSecondary),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: c.bg,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: c.border),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text("Offline wallet balance",
+                                style: TextStyle(fontSize: 12, color: c.textSecondary)),
+                            const SizedBox(height: 4),
+                            Text(
+                              "₹${wallet.offlineBalance.toStringAsFixed(0)}",
+                              style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w700,
+                                  color: c.textPrimary),
+                            ),
+                          ],
+                        ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text("Main balance",
+                                style: TextStyle(fontSize: 12, color: c.textSecondary)),
+                            const SizedBox(height: 4),
+                            Text(
+                              "₹${availableBalance.toStringAsFixed(0)}",
+                              style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: c.textSecondary),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: controller,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: false),
+                    style: TextStyle(color: c.textPrimary, fontSize: 16),
+                    decoration: InputDecoration(
+                      prefixText: "₹ ",
+                      hintText: "Amount to recharge, e.g. 100",
+                      filled: true,
+                      fillColor: c.bg,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide(color: c.border),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: c.purple,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(28),
+                        ),
+                      ),
+                      onPressed: isSubmitting
+                          ? null
+                          : () async {
+                        final amount = num.tryParse(controller.text.trim());
+                        if (amount == null || amount <= 0) {
+                          ScaffoldMessenger.of(sheetContext).showSnackBar(
+                            const SnackBar(content: Text("Enter a valid amount")),
+                          );
+                          return;
+                        }
+                        if (amount > availableBalance) {
+                          ScaffoldMessenger.of(sheetContext).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                "You only have ₹${availableBalance.toStringAsFixed(0)} "
+                                    "in your main balance.",
+                              ),
+                            ),
+                          );
+                          return;
+                        }
+
+                        setSheetState(() => isSubmitting = true);
+
+                        // This is the actual server call — main balance is
+                        // debited and offline_balance is credited
+                        // atomically, right now, while we're online.
+                        final result = await OfflineWalletService.recharge(amount);
+
+                        setSheetState(() => isSubmitting = false);
+
+                        if (result["success"] == true) {
+                          final updatedWallet = result["wallet"] as Wallet;
+                          auth.setUserWallet(updatedWallet);
+                          if (sheetContext.mounted) Navigator.pop(sheetContext);
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  "₹${amount.toStringAsFixed(0)} added to your "
+                                      "offline wallet.",
+                                ),
+                              ),
+                            );
+                          }
+                        } else {
+                          if (sheetContext.mounted) {
+                            ScaffoldMessenger.of(sheetContext).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  result["message"]?.toString() ?? "Recharge failed",
+                                ),
+                              ),
+                            );
+                          }
+                        }
+                      },
+                      child: isSubmitting
+                          ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation(Colors.white),
+                        ),
+                      )
+                          : const Text(
+                        "Recharge",
+                        style: TextStyle(
+                            color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   void _openPhotoViewer() {
@@ -623,6 +836,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 title: "Share QR code",
                                 subtitle: "Send your code to someone",
                                 onTap: _handleShare,
+                              ),
+                              _infoDivider(c),
+                              _listRow(
+                                c: c,
+                                icon: Icons.savings_outlined,
+                                title: "Offline wallet",
+                                subtitle: "Recharge to spend money without internet",
+                                onTap: () => _showOfflineWalletSheet(c),
                               ),
                             ],
                           ),

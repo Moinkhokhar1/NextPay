@@ -97,7 +97,18 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  Future<Map<String, dynamic>> loginWithOtp(String phone, String otp) async {
+  /// Verifies [otp] and, on success, publishes the session.
+  ///
+  /// [beforeCommit] runs after the code is confirmed good but *before*
+  /// user/token are set. That ordering matters: setting them notifies the auth
+  /// gate in main.dart, which swaps LoginScreen for HomeScreen and disposes any
+  /// animation still playing there. Callers with a success flourish should pass
+  /// it here rather than awaiting it after this returns.
+  Future<Map<String, dynamic>> loginWithOtp(
+    String phone,
+    String otp, {
+    Future<void> Function()? beforeCommit,
+  }) async {
     try {
       loading = true;
       notifyListeners();
@@ -120,6 +131,16 @@ class AuthProvider extends ChangeNotifier {
 
       await StorageService.setItem("token", newToken);
       await StorageService.setItem("user", jsonEncode(mergedUser.toJson()));
+
+      // The code is already accepted at this point, so a flourish that throws
+      // (or a screen that disposes mid-animation) must not fail the login.
+      if (beforeCommit != null) {
+        try {
+          await beforeCommit();
+        } catch (error) {
+          debugPrint("OTP LOGIN beforeCommit ERROR: $error");
+        }
+      }
 
       token = newToken;
       user = mergedUser;

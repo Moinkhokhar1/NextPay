@@ -1,22 +1,3 @@
-import 'dart:convert';
-import 'package:flutter/foundation.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import '../models/wallet.dart';
-import '../models/user.dart';
-import '../providers/auth_provider.dart';
-
-/// Mirrors offline/walletEngine.js
-///
-/// CHANGED: wallet/lock state now lives in flutter_secure_storage
-/// (Android Keystore-backed EncryptedSharedPreferences / iOS Keychain)
-/// instead of plain local storage, so a casual DB-browser edit on a
-/// rooted/jailbroken device can't trivially rewrite the balance.
-///
-/// This is defense-in-depth only. The real control is that the SERVER
-/// must never trust this local balance for settlement — it must
-/// re-derive the sender's true balance from its own ledger at sync
-/// time. Treat everything in this class as a client-side UX cache,
-/// not a source of truth.
 class WalletEngine {
   final AuthProvider authProvider;
 
@@ -35,11 +16,15 @@ class WalletEngine {
       }
 
       final wallet = user!.wallet!;
-      final currentBalance = wallet.balance;
+      final currentOfflineBalance = wallet.offlineBalance;
       final currentLocked = wallet.lockedBalance;
 
-      if (amount > currentBalance - currentLocked) {
-        return {"success": false, "message": "Insufficient balance"};
+      if (amount > currentOfflineBalance - currentLocked) {
+        return {
+          "success": false,
+          "message": "Insufficient offline wallet balance. Recharge your "
+              "offline wallet to make offline payments.",
+        };
       }
 
       final updatedWallet = wallet.copyWith(

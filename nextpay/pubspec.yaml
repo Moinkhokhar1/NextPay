@@ -76,6 +76,7 @@ dependencies:
   local_auth: ^2.3.0
   cryptography: ^2.7.0
   google_fonts: ^6.2.1
+  lottie: ^3.1.2
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -107,6 +108,7 @@ flutter:
     - assets/sounds/success.mp3
     - assets/icon/app_icon.png
     - assets/icon/splash_wordmark.png
+    - assets/animations/success.json
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

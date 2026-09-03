@@ -1,4 +1,3 @@
-// lib/services/sync_service.dart
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
@@ -41,6 +40,8 @@ class SyncService {
         if (remaining.isEmpty) {
           await StorageService.removeItem(storageKey);
           await StorageService.removeItem("local_wallet");
+          // Offline budget usage is derived live from this pending list,
+          // so clearing it here automatically frees the full budget again.
         } else {
           await StorageService.setItem(storageKey, jsonEncode(remaining));
         }
