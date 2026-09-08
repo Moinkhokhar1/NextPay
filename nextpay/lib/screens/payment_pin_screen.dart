@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../providers/theme_provider.dart';
 import '../app_colors.dart';
 import '../services/app_lock_service.dart';
+import '../widgets/forgot_pin_flow.dart';
 
 const _pinLength = 6;
 
@@ -305,6 +306,17 @@ class _PaymentPinScreenState extends State<PaymentPinScreen>
                     ),
                   ],
                 ),
+              ),
+            ),
+            TextButton(
+              onPressed:
+                  _checking ? null : () => showForgotPinFlow(context, popToRoot: true),
+              child: Text(
+                'Forgot PIN?',
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: c.purple),
               ),
             ),
             const SizedBox(height: 8),

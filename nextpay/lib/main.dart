@@ -36,7 +36,7 @@ class MyApp extends StatelessWidget {
           title: 'Offline Payment',
           debugShowCheckedModeBanner: false,
           theme: theme.themeData,
-          home: const OnboardingGate(child: AppRoot()),
+          home: const AppRoot(),
         ),
       ),
     );
@@ -118,7 +118,10 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
 
     if (auth.user != null && auth.token != null) {
       _startMonitorIfNeeded();
-      return const HomeScreen();
+      // PIN setup (new accounts) / lock screen (returning accounts) only
+      // ever appears once someone is actually signed in — never before
+      // registration or login.
+      return OnboardingGate(child: const HomeScreen());
     }
 
     return const LoginScreen();

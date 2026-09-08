@@ -4,16 +4,20 @@ import 'set_pin_screen.dart';
 import 'biometric_prompt_screen.dart';
 import 'lock_screen.dart';
 
-/// Drop this widget as the entry point of your app (wrap your MaterialApp's
-/// `home`). It decides what to show on every cold start:
+/// Drop this widget around the signed-in part of the app (e.g. wrap
+/// `HomeScreen` once `AuthProvider` has a user). It decides what to show
+/// each time someone is signed in:
 ///
 ///   No PIN set yet  →  SetPinScreen → BiometricPromptScreen → [child]
 ///   PIN set         →  LockScreen → [child]
 ///
-/// Usage in main.dart / your root widget:
+/// It should NOT wrap the login/register screens — PIN setup only makes
+/// sense once someone actually has an account to protect.
+///
+/// Usage:
 ///
 /// ```dart
-/// home: OnboardingGate(child: const HomeScreen()),
+/// if (auth.user != null) return OnboardingGate(child: const HomeScreen());
 /// ```
 class OnboardingGate extends StatefulWidget {
   final Widget child;

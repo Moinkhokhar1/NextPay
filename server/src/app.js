@@ -10,6 +10,7 @@ const syncRoutes = require("./routes/syncRoutes");
 
 const bankRouter = require('./routes/bank');
 const smsRoutes = require('./routes/sms_routes');
+const messageRoutes = require('./routes/messageRoutes');
  
 const app = express();
 
@@ -29,6 +30,7 @@ app.use("/api/wallet", walletRoutes);
 app.use("/api/sync", syncRoutes);
 app.use('/api', bankRouter);
 app.use('/api', smsRoutes);
+app.use('/api/messages', messageRoutes);
 
 const PORT = process.env.PORT || 8000;
 

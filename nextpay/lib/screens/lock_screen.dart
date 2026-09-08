@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../providers/theme_provider.dart';
 import '../app_colors.dart';
 import '../services/app_lock_service.dart';
+import '../widgets/forgot_pin_flow.dart';
 
 const _pinLength = 6;
 
@@ -299,6 +300,20 @@ class _LockScreenState extends State<LockScreen>
                             color: c.textSecondary)),
                   ],
                 ),
+              ),
+            ),
+
+            const SizedBox(height: 4),
+
+            // ── Forgot PIN ───────────────────────────────────────────
+            TextButton(
+              onPressed: _checking ? null : () => showForgotPinFlow(context),
+              child: Text(
+                'Forgot PIN?',
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: c.purple),
               ),
             ),
 

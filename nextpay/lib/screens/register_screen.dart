@@ -90,7 +90,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       if (!mounted) return;
 
-      // Pop register screen; AppRoot shows HomeScreen after auth update.
+      // Pop register screen; AppRoot now shows the PIN setup flow first
+      // (new account, no PIN yet), then HomeScreen once that's done.
       Navigator.of(context).popUntil((route) => route.isFirst);
     } finally {
       if (mounted) setState(() => _isLoading = false);

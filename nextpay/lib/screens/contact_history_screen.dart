@@ -5,8 +5,25 @@ import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
 import '../app_colors.dart';
 import '../models/wallet_transaction.dart';
+import '../models/chat_message.dart';
 import '../services/offline_tx_service.dart';
+import '../services/message_service.dart';
 import 'transaction_detail_screen.dart';
+
+/// A single entry in the merged chat + payment timeline.
+class _TimelineEntry {
+  final DateTime createdAt;
+  final WalletTransaction? tx;
+  final ChatMessage? message;
+
+  _TimelineEntry.tx(this.tx)
+      : createdAt = tx!.createdAt,
+        message = null;
+
+  _TimelineEntry.message(this.message)
+      : createdAt = message!.createdAt,
+        tx = null;
+}
 
 class ContactHistoryScreen extends StatefulWidget {
   final String contactId;
@@ -30,9 +47,19 @@ class ContactHistoryScreen extends StatefulWidget {
 
 class _ContactHistoryScreenState extends State<ContactHistoryScreen> {
   List<WalletTransaction> _transactions = [];
+  List<ChatMessage> _messages = [];
   bool _loading = true;
+  bool _sending = false;
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
+
+  List<_TimelineEntry> get _timeline {
+    final entries = [
+      ..._transactions.map(_TimelineEntry.tx),
+      ..._messages.map(_TimelineEntry.message),
+    ]..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return entries;
+  }
 
   @override
   void initState() {
@@ -61,15 +88,48 @@ class _ContactHistoryScreenState extends State<ContactHistoryScreen> {
   Future<void> _load() async {
     try {
       final auth = context.read<AuthProvider>();
-      final withContact =
-          await OfflineTxService.loadForContact(auth, widget.contactId);
+      final results = await Future.wait([
+        OfflineTxService.loadForContact(auth, widget.contactId),
+        MessageService.loadThread(widget.contactId),
+      ]);
 
-      if (mounted) setState(() => _transactions = withContact);
-      if (withContact.isNotEmpty) _scrollToLatest();
+      if (!mounted) return;
+      setState(() {
+        _transactions = results[0] as List<WalletTransaction>;
+        _messages = results[1] as List<ChatMessage>;
+      });
+      if (_timeline.isNotEmpty) _scrollToLatest();
     } catch (e) {
       debugPrint('CONTACT HISTORY ERROR: $e');
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _sendMessage() async {
+    final text = _messageController.text.trim();
+    if (text.isEmpty || _sending) return;
+
+    setState(() => _sending = true);
+    _messageController.clear();
+
+    try {
+      final sent = await MessageService.send(
+        receiverId: widget.contactId,
+        content: text,
+      );
+      if (!mounted) return;
+      setState(() => _messages = [..._messages, sent]);
+      _scrollToLatest();
+    } catch (e) {
+      debugPrint('SEND MESSAGE ERROR: $e');
+      if (!mounted) return;
+      _messageController.text = text;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Couldn't send message. Try again.")),
+      );
+    } finally {
+      if (mounted) setState(() => _sending = false);
     }
   }
 
@@ -86,34 +146,49 @@ class _ContactHistoryScreenState extends State<ContactHistoryScreen> {
           Expanded(
             child: _loading
                 ? Center(child: CircularProgressIndicator(color: c.purple))
-                : _transactions.isEmpty
+                : _timeline.isEmpty
                 ? Center(
-              child: Text('No transactions yet',
+              child: Text('No messages or transactions yet',
                   style: TextStyle(color: c.textSecondary)),
             )
                 : ListView.builder(
               controller: _scrollController,
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-              itemCount: _transactions.length,
+              itemCount: _timeline.length,
               itemBuilder: (context, index) {
-                final tx = _transactions[index];
-                final prev = index > 0 ? _transactions[index - 1] : null;
-                // Contact sent to you → left; you sent to contact → right
-                final isReceived = tx.senderId == widget.contactId;
-                final showDivider =
-                    prev == null || !_isSameDay(prev.createdAt, tx.createdAt);
+                final entry = _timeline[index];
+                final prev = index > 0 ? _timeline[index - 1] : null;
+                final showDivider = prev == null ||
+                    !_isSameDay(prev.createdAt, entry.createdAt);
+
+                final Widget bubble;
+                if (entry.tx != null) {
+                  final tx = entry.tx!;
+                  // Contact sent to you → left; you sent to contact → right
+                  final isReceived = tx.senderId == widget.contactId;
+                  bubble = _TxBubble(
+                    tx: tx,
+                    isReceived: isReceived,
+                    contactName: widget.contactName,
+                    contactPhone: widget.contactPhone,
+                    c: c,
+                  );
+                } else {
+                  final msg = entry.message!;
+                  final isReceived = msg.senderId == widget.contactId;
+                  bubble = _MessageBubble(
+                    message: msg,
+                    isReceived: isReceived,
+                    c: c,
+                  );
+                }
 
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    if (showDivider) _DateDivider(date: tx.createdAt, c: c),
-                    _TxBubble(
-                      tx: tx,
-                      isReceived: isReceived,
-                      contactName: widget.contactName,
-                      contactPhone: widget.contactPhone,
-                      c: c,
-                    ),
+                    if (showDivider)
+                      _DateDivider(date: entry.createdAt, c: c),
+                    bubble,
                   ],
                 );
               },
@@ -142,12 +217,8 @@ class _ContactHistoryScreenState extends State<ContactHistoryScreen> {
                   }
                 }
               },
-            onSend: () {
-              final text = _messageController.text.trim();
-              if (text.isEmpty) return;
-              // TODO: wire to your chat/message API
-              _messageController.clear();
-            },
+            onSend: _sendMessage,
+            sending: _sending,
           ),
         ],
       ),
@@ -356,6 +427,62 @@ class _TxBubble extends StatelessWidget {
   }
 }
 
+// ── Chat message bubble ────────────────────────────────────────────────────
+
+class _MessageBubble extends StatelessWidget {
+  final ChatMessage message;
+  final bool isReceived;
+  final AppColors c;
+  const _MessageBubble({
+    required this.message,
+    required this.isReceived,
+    required this.c,
+  });
+
+  String _time(DateTime d) {
+    final hour = d.hour % 12 == 0 ? 12 : d.hour % 12;
+    final minute = d.minute.toString().padLeft(2, '0');
+    final ampm = d.hour >= 12 ? 'pm' : 'am';
+    return '$hour:$minute$ampm';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: isReceived ? Alignment.centerLeft : Alignment.centerRight,
+      child: ConstrainedBox(
+        constraints:
+            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: isReceived ? c.surface : c.purpleLight,
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(16),
+              topRight: const Radius.circular(16),
+              bottomLeft: Radius.circular(isReceived ? 4 : 16),
+              bottomRight: Radius.circular(isReceived ? 16 : 4),
+            ),
+            border: Border.all(color: c.border, width: 1),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(message.content,
+                  style: TextStyle(fontSize: 14, color: c.textPrimary)),
+              const SizedBox(height: 4),
+              Text(_time(message.createdAt),
+                  style: TextStyle(fontSize: 10, color: c.textSecondary)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ── Bottom bar: Pay + message ────────────────────────────────────────────────
 
 class _BottomBar extends StatelessWidget {
@@ -363,12 +490,14 @@ class _BottomBar extends StatelessWidget {
   final TextEditingController controller;
   final VoidCallback onPay;
   final VoidCallback onSend;
+  final bool sending;
 
   const _BottomBar({
     required this.c,
     required this.controller,
     required this.onPay,
     required this.onSend,
+    this.sending = false,
   });
 
   @override
@@ -413,8 +542,17 @@ class _BottomBar extends StatelessWidget {
                       ),
                     ),
                     IconButton(
-                      icon: Icon(Icons.send_rounded, color: c.purple),
-                      onPressed: onSend,
+                      icon: sending
+                          ? SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: c.purple,
+                              ),
+                            )
+                          : Icon(Icons.send_rounded, color: c.purple),
+                      onPressed: sending ? null : onSend,
                     ),
                   ],
                 ),

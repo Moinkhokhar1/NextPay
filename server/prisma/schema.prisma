@@ -21,6 +21,8 @@ model User {
   wallet                Wallet?
   bankAccount           BankAccount?
   withdrawals           Withdrawal[]
+  messages_sent         Message[]     @relation("sentMessages")
+  messages_received     Message[]     @relation("receivedMessages")
 }
 
 model Wallet {
@@ -78,6 +80,20 @@ model Withdrawal {
   user        User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@map("withdrawals")
+}
+
+model Message {
+  id          String   @id @default(uuid())
+  sender_id   String
+  receiver_id String
+  content     String
+  created_at  DateTime @default(now())
+  sender      User     @relation("sentMessages", fields: [sender_id], references: [id])
+  receiver    User     @relation("receivedMessages", fields: [receiver_id], references: [id])
+
+  @@index([sender_id, receiver_id])
+  @@index([receiver_id, sender_id])
+  @@map("messages")
 }
 
 model Otp {

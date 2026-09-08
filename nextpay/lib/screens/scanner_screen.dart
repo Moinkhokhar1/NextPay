@@ -3,9 +3,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'contact_history_screen.dart';
-import 'send_screen.dart';
-import 'package:nextpay/screens/contact_history_screen.dart';
+import 'payment_sheet_screen.dart';
 import '../services/api_service.dart';
 
 // ── Design tokens ───────────────────────────────────────────────
@@ -88,14 +86,15 @@ class _ScannerScreenState extends State<ScannerScreen> {
 
       if (!mounted) return;
 
+      // Go straight to the amount-entry / send screen, GPay-style — no
+      // detour through the contact's profile/history first.
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (_) => ContactHistoryScreen(
-            contactId: userId,
-            contactName: userName,
-            contactPhone: userPhone,
-            popOnPaymentSuccess: true,
+          builder: (_) => PaymentSheetScreen(
+            receiverId: userId,
+            receiverName: userName,
+            receiverPhone: userPhone,
           ),
         ),
       );
