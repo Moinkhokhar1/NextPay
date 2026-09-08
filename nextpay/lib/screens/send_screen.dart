@@ -583,8 +583,39 @@ class _SendScreenState extends State<SendScreen> {
     }
   }
 
+  String _resolveUserId(AuthProvider auth) {
+    final user = auth.user;
+
+    if (user == null) return '';
+
+    final walletUserId = user.wallet?.extra['user_id'];
+    if (walletUserId != null) {
+      return walletUserId.toString();
+    }
+
+    final userIdExtra = user.extra['user_id'];
+    if (userIdExtra != null) {
+      return userIdExtra.toString();
+    }
+
+    return user.id;
+  }
+
+
   Future<void> _findUserByMobile() async {
     final input = _mobileController.text.trim();
+
+    final auth = context.read<AuthProvider>();
+    final ownerUserId = _resolveUserId(auth);
+
+    if (ownerUserId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('User session not found. Please login again.'),
+        ),
+      );
+      return;
+    }
 
     if (input.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -611,6 +642,7 @@ class _SendScreenState extends State<SendScreen> {
         final userPhone = user['phone']?.toString() ?? input;
 
         await ContactCacheService.instance.save(
+          ownerUserId: ownerUserId,
           userId: userId,
           name: userName,
           phone: userPhone,
@@ -626,7 +658,10 @@ class _SendScreenState extends State<SendScreen> {
       }
 
       // Offline: look up previously saved contact by phone.
-      final cached = await ContactCacheService.instance.findByPhone(input);
+      final cached = await ContactCacheService.instance.findByPhone(
+        ownerUserId: ownerUserId,
+        phone: input,
+      );
       if (cached != null && cached['userId']?.isNotEmpty == true) {
         if (!mounted) return;
         await _openContactProfile(

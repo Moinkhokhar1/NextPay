@@ -15,9 +15,9 @@ import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
 import '../app_colors.dart';
 import '../models/wallet.dart';
-import '../services/offline_wallet_service.dart';
 import 'home_screen.dart';
 import 'scanner_screen.dart';
+import 'package:gal/gal.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -31,82 +31,214 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final ImagePicker _imagePicker = ImagePicker();
   File? _profileImage;
 
-  static const _prefKey = 'profile_image_path';
+  String _profileImageKey(String userId) =>
+    'profile_image_path_$userId';
 
+String _profileImageFile(String userId, String extension) =>
+    'profile_photo_$userId.$extension';
+
+  Future<String?> _currentUserId() async {
+    final auth = context.read<AuthProvider>();
+    return auth.user?.id;
+  }
   @override
   void initState() {
     super.initState();
     _loadSavedImage();
   }
+  // -----------------------------------------------------------------------------------------------------------------
+
+  // -----------------------------------------------------------------------------------------------------------------
 
   // ── Persistence / image handling (unchanged logic) ─────────────────────
 
   Future<void> _loadSavedImage() async {
+    final userId = await _currentUserId();
+
+    if (userId == null || userId.isEmpty) {
+      return;
+    }
+
     final prefs = await SharedPreferences.getInstance();
-    final path = prefs.getString(_prefKey);
-    if (path != null) {
-      final file = File(path);
-      if (await file.exists()) {
-        setState(() => _profileImage = file);
-      } else {
-        await prefs.remove(_prefKey);
+
+    final path = prefs.getString(
+      _profileImageKey(userId),
+    );
+
+    if (path == null || path.isEmpty) {
+      return;
+    }
+
+    final file = File(path);
+
+    if (await file.exists()) {
+      if (mounted) {
+        setState(() {
+          _profileImage = file;
+        });
       }
+    } else {
+      await prefs.remove(_profileImageKey(userId));
     }
   }
 
-  Future<void> _saveImagePath(String path) async {
+  Future<void> _saveImagePath(
+      String userId,
+      String path,
+      ) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_prefKey, path);
+
+    await prefs.setString(
+      _profileImageKey(userId),
+      path,
+    );
   }
 
-  Future<void> _clearImagePath() async {
+  Future<void> _clearImagePath(String userId) async {
+    if (userId.isEmpty) return;
+
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_prefKey);
+    await prefs.remove(_profileImageKey(userId));
   }
 
-  Future<File> _persistImage(File tempFile) async {
+  Future<File> _persistImage(
+      File tempFile,
+      String userId,
+      ) async {
     final appDir = await getApplicationDocumentsDirectory();
-    final permanent = File('${appDir.path}/profile_photo.jpg');
+
+    final extension =
+    tempFile.path.toLowerCase().endsWith('.png')
+        ? 'png'
+        : 'jpg';
+
+    final permanent = File(
+      '${appDir.path}/${_profileImageFile(userId, extension)}',
+    );
+
     return tempFile.copy(permanent.path);
   }
 
+  // Future<void> _handleShare() async {
+  //   try {
+  //     final imageBytes = await _screenshotController.capture();
+  //     if (imageBytes == null) return;
+  //     final dir = await getTemporaryDirectory();
+  //     final file = File('${dir.path}/offlinepay_qr.png');
+  //     await file.writeAsBytes(imageBytes);
+  //
+  //     final size = MediaQuery.of(context).size;
+  //     final rect = Rect.fromCenter(
+  //       center: Offset(size.width / 2, size.height * 0.75),
+  //       width: 200,
+  //       height: 50,
+  //     );
+  //
+  //     await Share.shareXFiles(
+  //       [XFile(file.path)],
+  //       text: 'Scan to pay me',
+  //       sharePositionOrigin: rect,
+  //     );
+  //   } catch (e) {
+  //     debugPrint("Share error: $e");
+  //   }
+  // }
   Future<void> _handleShare() async {
     try {
-      final imageBytes = await _screenshotController.capture();
-      if (imageBytes == null) return;
+      final imageBytes =
+      await _screenshotController.capture(
+        pixelRatio: 3.0,
+      );
+
+      if (imageBytes == null) {
+        throw Exception(
+          'Unable to generate QR image',
+        );
+      }
+
       final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}/offlinepay_qr.png');
-      await file.writeAsBytes(imageBytes);
+
+      final file = File(
+        '${dir.path}/nextpay_qr.png',
+      );
+
+      await file.writeAsBytes(
+        imageBytes,
+        flush: true,
+      );
+
+      if (!await file.exists()) {
+        throw Exception(
+          'QR file was not created',
+        );
+      }
 
       final size = MediaQuery.of(context).size;
+
       final rect = Rect.fromCenter(
-        center: Offset(size.width / 2, size.height * 0.75),
+        center: Offset(
+          size.width / 2,
+          size.height * 0.75,
+        ),
         width: 200,
         height: 50,
       );
 
       await Share.shareXFiles(
         [XFile(file.path)],
-        text: 'Scan to pay me',
+        text: 'Scan to pay me using NextPay',
         sharePositionOrigin: rect,
       );
-    } catch (e) {
-      debugPrint("Share error: $e");
+    } catch (e, stack) {
+      debugPrint(
+        'QR SHARE ERROR: $e\n$stack',
+      );
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Unable to share QR code. Please try again.',
+          ),
+        ),
+      );
     }
   }
 
   Future<void> _pickImage(ImageSource source) async {
     try {
-      final XFile? picked = await _imagePicker.pickImage(
+      final auth = context.read<AuthProvider>();
+      final userId = auth.user?.id;
+
+      if (userId == null || userId.isEmpty) {
+        return;
+      }
+
+      final picked = await _imagePicker.pickImage(
         source: source,
         imageQuality: 85,
         maxWidth: 512,
         maxHeight: 512,
       );
+
       if (picked == null) return;
-      final permanent = await _persistImage(File(picked.path));
-      await _saveImagePath(permanent.path);
-      setState(() => _profileImage = permanent);
+
+      final permanent = await _persistImage(
+        File(picked.path),
+        userId,
+      );
+
+      await _saveImagePath(
+        userId,
+        permanent.path,
+      );
+
+      if (mounted) {
+        setState(() {
+          _profileImage = permanent;
+        });
+      }
     } catch (e) {
       debugPrint("Image pick error: $e");
     }
@@ -118,9 +250,69 @@ class _ProfileScreenState extends State<ProfileScreen> {
         if (await _profileImage!.exists()) await _profileImage!.delete();
       } catch (_) {}
     }
-    await _clearImagePath();
+    final auth = context.read<AuthProvider>();
+    final userId = auth.user?.id ?? '';
+    await _clearImagePath(userId);
     setState(() => _profileImage = null);
   }
+
+  Future<void> _handleDownloadQr() async {
+  try {
+    final imageBytes =
+        await _screenshotController.capture(
+      pixelRatio: 3.0,
+    );
+
+    if (imageBytes == null) {
+      throw Exception('Unable to generate QR image');
+    }
+
+    final hasAccess = await Gal.hasAccess();
+
+    if (!hasAccess) {
+      final granted = await Gal.requestAccess();
+
+      if (!granted) {
+        throw Exception(
+          'Gallery permission denied',
+        );
+      }
+    }
+
+    final dir = await getTemporaryDirectory();
+
+    final file = File(
+      '${dir.path}/nextpay_qr_${DateTime.now().millisecondsSinceEpoch}.png',
+    );
+
+    await file.writeAsBytes(imageBytes);
+
+    await Gal.putImage(
+      file.path,
+      album: 'NextPay',
+    );
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('QR code saved to your gallery'),
+      ),
+    );
+  } catch (e) {
+    debugPrint('QR DOWNLOAD ERROR: $e');
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Could not save QR code: $e',
+        ),
+      ),
+    );
+  }
+}
 
   Future<void> _handleLogout() async {
     final auth = context.read<AuthProvider>();
@@ -558,7 +750,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
         .toUpperCase();
     final initialsShort = initials.length > 2 ? initials.substring(0, 2) : initials;
 
-    final qrValue = jsonEncode({"userId": userId, "receiverName": userName});
+    final qrValue = jsonEncode({
+      "type": "nextpay",
+      "version": 1,
+      "userId": userId,
+      "receiverName": userName,
+      // "receiverPhone": user?.phone ?? "",
+    });
     final walletBalance = user?.wallet?.balance ?? 0;
     final lockedBalance = user?.wallet?.lockedBalance ?? 0;
 

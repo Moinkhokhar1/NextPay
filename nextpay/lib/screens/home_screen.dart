@@ -34,7 +34,9 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isOnline = true;
   bool _balanceVisible = false;
   File? _profileImage;
-  static const _prefKey = 'profile_image_path';
+  String _profileImageKey(String userId) =>
+      'profile_image_path_$userId';
+
   StreamSubscription<List<ConnectivityResult>>? _connSub;
   final _peopleRowKey = GlobalKey<PeopleRowState>();
 
@@ -77,13 +79,31 @@ class _HomeScreenState extends State<HomeScreen> {
   // Loads the same data HistoryScreen shows (and shares its cache key),
   // then keeps just the most recent 5 for the home screen preview.
   Future<void> _loadRecentTransactions() async {
+    final auth = context.read<AuthProvider>();
+    final userId = _resolveUserId(auth);
+
+    if (userId == null || userId.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _recentTx = [];
+          _txLoading = false;
+        });
+      }
+      return;
+    }
+
+    final cacheKey = "cached_transactions_$userId";
+
     try {
       final response = await ApiService.instance.get("/wallet/transactions");
       final List<dynamic> data = response.data;
+
       final txs = data
           .map((e) => WalletTransaction.fromJson(Map<String, dynamic>.from(e)))
           .toList();
-      await StorageService.setItem("cached_transactions", jsonEncode(data));
+
+      await StorageService.setItem(cacheKey, jsonEncode(data));
+
       if (mounted) {
         setState(() {
           _recentTx = txs.take(5).toList();
@@ -92,20 +112,28 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } catch (error) {
       debugPrint("❌ HOME RECENT TX ERROR (trying cache): $error");
+
       try {
-        final cached = await StorageService.getItem("cached_transactions");
+        final cached = await StorageService.getItem(cacheKey);
+
         if (cached != null) {
           final List<dynamic> data = jsonDecode(cached);
           final txs = data
               .map((e) =>
-              WalletTransaction.fromJson(Map<String, dynamic>.from(e)))
+                  WalletTransaction.fromJson(Map<String, dynamic>.from(e)))
               .toList();
-          if (mounted) setState(() => _recentTx = txs.take(5).toList());
+
+          if (mounted) {
+            setState(() => _recentTx = txs.take(5).toList());
+          }
         }
       } catch (e) {
         debugPrint("❌ HOME RECENT TX CACHE ERROR: $e");
       }
-      if (mounted) setState(() => _txLoading = false);
+
+      if (mounted) {
+        setState(() => _txLoading = false);
+      }
     }
   }
 
@@ -113,6 +141,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final lockedBalance = (auth.user?.wallet?.lockedBalance ?? 0).toDouble();
     if (lockedBalance > 0) return true;
     final userId = _resolveUserId(auth);
+
     if (userId == null || userId.isEmpty) return false;
     final pendingRaw =
     await StorageService.getItem("pending_transactions_$userId");
@@ -128,14 +157,37 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadProfileImage() async {
+    final auth = context.read<AuthProvider>();
+    final userId = _resolveUserId(auth);
+
+    if (userId == null || userId.isEmpty) {
+      if (mounted) {
+        setState(() => _profileImage = null);
+      }
+      return;
+    }
+
     final prefs = await SharedPreferences.getInstance();
-    final path = prefs.getString(_prefKey);
-    if (path != null) {
-      final file = File(path);
-      if (await file.exists()) {
-        if (mounted) setState(() => _profileImage = file);
-      } else {
-        await prefs.remove(_prefKey);
+    final path = prefs.getString(_profileImageKey(userId));
+
+    if (path == null || path.isEmpty) {
+      if (mounted) {
+        setState(() => _profileImage = null);
+      }
+      return;
+    }
+
+    final file = File(path);
+
+    if (await file.exists()) {
+      if (!mounted) return;
+
+      setState(() => _profileImage = file);
+    } else {
+      await prefs.remove(_profileImageKey(userId));
+
+      if (mounted) {
+        setState(() => _profileImage = null);
       }
     }
   }

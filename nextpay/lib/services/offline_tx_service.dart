@@ -1,4 +1,5 @@
 import 'dart:convert';
+
 import '../models/transaction.dart';
 import '../models/wallet_transaction.dart';
 import '../providers/auth_provider.dart';
@@ -10,22 +11,46 @@ import '../services/storage_service.dart';
 class OfflineTxService {
   OfflineTxService._();
 
+  // ---------------------------------------------------------------------------
+  // Resolve the currently logged-in user's canonical ID.
+  // ---------------------------------------------------------------------------
+
   static String? resolveUserId(AuthProvider auth) {
     final user = auth.user;
+
     if (user == null) return null;
+
     final walletUserId = user.wallet?.extra['user_id'];
-    if (walletUserId != null) return walletUserId.toString();
+
+    if (walletUserId != null &&
+        walletUserId.toString().isNotEmpty) {
+      return walletUserId.toString();
+    }
+
     final userIdExtra = user.extra['user_id'];
-    if (userIdExtra != null) return userIdExtra.toString();
-    return user.id;
+
+    if (userIdExtra != null &&
+        userIdExtra.toString().isNotEmpty) {
+      return userIdExtra.toString();
+    }
+
+    if (user.id.isNotEmpty) {
+      return user.id;
+    }
+
+    return null;
   }
 
+  // ---------------------------------------------------------------------------
+  // Convert an offline transaction into the common WalletTransaction model.
+  // ---------------------------------------------------------------------------
+
   static WalletTransaction fromOfflineTx(
-    OfflineTransaction ot, {
-    String senderName = 'Unknown',
-    String receiverName = 'Unknown',
-    String note = '',
-  }) {
+      OfflineTransaction ot, {
+        String senderName = 'Unknown',
+        String receiverName = 'Unknown',
+        String note = '',
+      }) {
     return WalletTransaction(
       id: ot.txId,
       senderId: ot.sender,
@@ -34,80 +59,243 @@ class OfflineTxService {
       receiverName: receiverName,
       amount: ot.amount,
       isOffline: true,
-      status: ot.status.isNotEmpty ? ot.status : 'Pending',
+      status: ot.status.isNotEmpty
+          ? ot.status
+          : 'Pending',
       extra: {
         'created_at':
-            DateTime.fromMillisecondsSinceEpoch(ot.timestamp).toUtc().toIso8601String(),
+        DateTime.fromMillisecondsSinceEpoch(
+          ot.timestamp,
+        ).toUtc().toIso8601String(),
         'nonce': ot.nonce,
         if (note.isNotEmpty) 'note': note,
       },
     );
   }
 
-  static Future<List<WalletTransaction>> _pendingForUser(String userId) async {
-    final raw = await StorageService.getItem('pending_transactions_$userId');
-    if (raw == null) return [];
+  // ---------------------------------------------------------------------------
+  // Load pending offline transactions belonging to one account.
+  // ---------------------------------------------------------------------------
 
-    final List<dynamic> list = jsonDecode(raw);
+  static Future<List<WalletTransaction>> _pendingForUser(
+      String ownerUserId,
+      ) async {
+    if (ownerUserId.isEmpty) {
+      return [];
+    }
+
+    final raw = await StorageService.getItem(
+      'pending_transactions_$ownerUserId',
+    );
+
+    if (raw == null || raw.isEmpty) {
+      return [];
+    }
+
+    final List<dynamic> list;
+
+    try {
+      list = jsonDecode(raw) as List<dynamic>;
+    } catch (e) {
+      return [];
+    }
+
     final cache = ContactCacheService.instance;
+
     final result = <WalletTransaction>[];
 
     for (final item in list) {
-      final ot = OfflineTransaction.fromJson(Map<String, dynamic>.from(item));
-      final senderCached = await cache.get(ot.sender);
-      final receiverCached = await cache.get(ot.receiver);
-      result.add(fromOfflineTx(
-        ot,
-        senderName: senderCached?['name'] ?? 'Unknown',
-        receiverName: receiverCached?['name'] ?? 'Unknown',
-      ));
+      try {
+        final ot =
+        OfflineTransaction.fromJson(
+          Map<String, dynamic>.from(item),
+        );
+
+        // IMPORTANT:
+        // ContactCacheService now uses account-scoped named arguments.
+        final senderCached = await cache.get(
+          ownerUserId: ownerUserId,
+          userId: ot.sender,
+        );
+
+        final receiverCached = await cache.get(
+          ownerUserId: ownerUserId,
+          userId: ot.receiver,
+        );
+
+        result.add(
+          fromOfflineTx(
+            ot,
+            senderName:
+            senderCached?['name']?.isNotEmpty == true
+                ? senderCached!['name']!
+                : 'Unknown',
+            receiverName:
+            receiverCached?['name']?.isNotEmpty == true
+                ? receiverCached!['name']!
+                : 'Unknown',
+          ),
+        );
+      } catch (e) {
+        // Do not let one malformed pending transaction prevent
+        // the rest of the account's history from loading.
+        continue;
+      }
     }
+
     return result;
   }
 
-  static Future<List<WalletTransaction>> loadAll(AuthProvider auth) async {
-    final merged = <String, WalletTransaction>{};
+  // ---------------------------------------------------------------------------
+  // Load all transactions:
+  //
+  // 1. API when online
+  // 2. Account-specific transaction cache when offline
+  // 3. Account-specific pending offline transactions
+  // ---------------------------------------------------------------------------
+
+  static Future<List<WalletTransaction>> loadAll(
+      AuthProvider auth,
+      ) async {
+    final merged =
+    <String, WalletTransaction>{};
+
+    final userId =
+    resolveUserId(auth);
+
+    if (userId == null ||
+        userId.isEmpty) {
+      return [];
+    }
+
+    final transactionCacheKey =
+        'cached_transactions_$userId';
+
+    // -------------------------------------------------------------------------
+    // Online API / offline local cache
+    // -------------------------------------------------------------------------
 
     try {
-      final response = await ApiService.instance.get('/wallet/transactions');
-      final List<dynamic> data = response.data;
-      await StorageService.setItem('cached_transactions', jsonEncode(data));
+      final response =
+      await ApiService.instance.get(
+        '/wallet/transactions',
+      );
+
+      final List<dynamic> data =
+      response.data is List
+          ? List<dynamic>.from(response.data)
+          : [];
+
+      // IMPORTANT:
+      // Cache transactions under the currently logged-in account.
+      await StorageService.setItem(
+        transactionCacheKey,
+        jsonEncode(data),
+      );
+
       for (final item in data) {
-        final tx = WalletTransaction.fromJson(Map<String, dynamic>.from(item));
-        merged[tx.id] = tx;
-      }
-    } catch (_) {
-      final cached = await StorageService.getItem('cached_transactions');
-      if (cached != null) {
-        final List<dynamic> data = jsonDecode(cached);
-        for (final item in data) {
+        try {
           final tx =
-              WalletTransaction.fromJson(Map<String, dynamic>.from(item));
+          WalletTransaction.fromJson(
+            Map<String, dynamic>.from(item),
+          );
+
           merged[tx.id] = tx;
+        } catch (_) {
+          // Ignore malformed individual transactions.
         }
       }
-    }
+    } catch (_) {
+      // -----------------------------------------------------------------------
+      // Offline fallback
+      // -----------------------------------------------------------------------
 
-    final userId = resolveUserId(auth);
-    if (userId != null) {
-      for (final tx in await _pendingForUser(userId)) {
-        merged[tx.id] = tx;
+      try {
+        final cached =
+        await StorageService.getItem(
+          transactionCacheKey,
+        );
+
+        if (cached != null &&
+            cached.isNotEmpty) {
+          final List<dynamic> data =
+          jsonDecode(cached);
+
+          for (final item in data) {
+            try {
+              final tx =
+              WalletTransaction.fromJson(
+                Map<String, dynamic>.from(item),
+              );
+
+              merged[tx.id] = tx;
+            } catch (_) {
+              // Ignore malformed cached transactions.
+            }
+          }
+        }
+      } catch (_) {
+        // No usable local transaction cache.
       }
     }
 
-    final list = merged.values.toList()
-      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    // -------------------------------------------------------------------------
+    // Merge pending offline transactions.
+    // -------------------------------------------------------------------------
+
+    final pending =
+    await _pendingForUser(userId);
+
+    for (final tx in pending) {
+      merged[tx.id] = tx;
+    }
+
+    // -------------------------------------------------------------------------
+    // Sort newest first.
+    // -------------------------------------------------------------------------
+
+    final list =
+    merged.values.toList()
+      ..sort(
+            (a, b) =>
+            b.createdAt.compareTo(
+              a.createdAt,
+            ),
+      );
+
     return list;
   }
 
+  // ---------------------------------------------------------------------------
+  // Load transactions involving one specific contact.
+  // ---------------------------------------------------------------------------
+
   static Future<List<WalletTransaction>> loadForContact(
-    AuthProvider auth,
-    String contactId,
-  ) async {
-    final all = await loadAll(auth);
-    return all
-        .where((tx) => tx.senderId == contactId || tx.receiverId == contactId)
-        .toList()
-      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      AuthProvider auth,
+      String contactId,
+      ) async {
+    if (contactId.isEmpty) {
+      return [];
+    }
+
+    final all =
+    await loadAll(auth);
+
+    final result = all
+        .where(
+          (tx) =>
+      tx.senderId == contactId ||
+          tx.receiverId == contactId,
+    )
+        .toList();
+
+    result.sort(
+          (a, b) =>
+          a.createdAt.compareTo(
+            b.createdAt,
+          ),
+    );
+
+    return result;
   }
 }

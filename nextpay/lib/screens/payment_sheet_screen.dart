@@ -56,6 +56,24 @@ class _PaymentSheetScreenState extends State<PaymentSheetScreen> {
     return connectivity.any((r) => r != ConnectivityResult.none);
   }
 
+  String _resolveUserId(AuthProvider auth) {
+    final user = auth.user;
+
+    if (user == null) return '';
+
+    final walletUserId = user.wallet?.extra['user_id'];
+    if (walletUserId != null) {
+      return walletUserId.toString();
+    }
+
+    final userIdExtra = user.extra['user_id'];
+    if (userIdExtra != null) {
+      return userIdExtra.toString();
+    }
+
+    return user.id;
+  }
+
   Future<void> _pay() async {
     final amountText = _amountController.text.trim();
 
@@ -85,6 +103,20 @@ class _PaymentSheetScreenState extends State<PaymentSheetScreen> {
     }
 
     final auth = context.read<AuthProvider>();
+    final ownerUserId = _resolveUserId(auth);
+
+    if (ownerUserId.isEmpty) {
+      if (mounted) {
+        setState(() => _isPaying = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('User session not found. Please login again.'),
+          ),
+        );
+      }
+      return;
+    }
+
     final wallet = auth.user?.wallet;
     final locked = (wallet?.lockedBalance ?? 0).toDouble();
     final balance = (wallet?.balance ?? 0).toDouble();
@@ -117,6 +149,7 @@ class _PaymentSheetScreenState extends State<PaymentSheetScreen> {
         if (!mounted) return;
 
         await ContactCacheService.instance.save(
+          ownerUserId: ownerUserId,
           userId: widget.receiverId,
           name: widget.receiverName,
           phone: widget.receiverPhone,
@@ -203,6 +236,7 @@ class _PaymentSheetScreenState extends State<PaymentSheetScreen> {
           : 'SMS FAILED: ${smsResult.message}');
 
       await ContactCacheService.instance.save(
+        ownerUserId: senderId,
         userId: widget.receiverId,
         name: widget.receiverName,
         phone: widget.receiverPhone,
