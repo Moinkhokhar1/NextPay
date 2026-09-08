@@ -83,7 +83,8 @@ class AppLockService {
           stickyAuth: true,
         ),
       );
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('🔐 BIOMETRIC AUTH FAILED: $e');
       return false;
     }
   }
