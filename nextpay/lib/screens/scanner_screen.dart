@@ -1,8 +1,12 @@
 import 'dart:convert';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'contact_history_screen.dart';
 import 'send_screen.dart';
+import 'package:nextpay/screens/contact_history_screen.dart';
+import '../services/api_service.dart';
 
 // ── Design tokens ───────────────────────────────────────────────
 // Camera screens stay dark for viewfinder contrast, but the accent
@@ -31,12 +35,14 @@ class _ScannerScreenState extends State<ScannerScreen> {
     super.dispose();
   }
 
-  void _handleBarcodeScanned(BarcodeCapture capture) {
+  Future<void> _handleBarcodeScanned(BarcodeCapture capture) async {
     if (_scanned) return;
+
     final barcodes = capture.barcodes;
     if (barcodes.isEmpty) return;
+
     final data = barcodes.first.rawValue;
-    if (data == null) return;
+    if (data == null || data.trim().isEmpty) return;
 
     setState(() => _scanned = true);
 
@@ -45,22 +51,77 @@ class _ScannerScreenState extends State<ScannerScreen> {
 
     try {
       final parsed = Map<String, dynamic>.from(jsonDecode(data));
+
       receiverId = parsed["userId"]?.toString();
       receiverName = parsed["receiverName"]?.toString();
     } catch (_) {
-      // Plain string fallback — treat as receiverId
-      receiverId = data;
+      // Support old/plain QR codes
+      receiverId = data.trim();
     }
 
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (_) => SendScreen(
-          receiverId: receiverId,
-          receiverName: receiverName,
+    if (receiverId == null || receiverId!.isEmpty) {
+      setState(() => _scanned = false);
+
+      _showAlert(
+        "Invalid QR code",
+        "This QR code does not contain a valid NextPay user ID.",
+      );
+
+      return;
+    }
+
+    try {
+      // Fetch the latest receiver information from backend.
+      final response = await ApiService.instance.get(
+        "/auth/users/by-id/$receiverId",
+      );
+
+      final user = Map<String, dynamic>.from(response.data);
+
+      final userId = user["id"]?.toString() ?? receiverId!;
+      final userName =
+          user["name"]?.toString() ??
+              receiverName ??
+              "Unknown User";
+
+      final userPhone = user["phone"]?.toString() ?? "";
+
+      if (!mounted) return;
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ContactHistoryScreen(
+            contactId: userId,
+            contactName: userName,
+            contactPhone: userPhone,
+            popOnPaymentSuccess: true,
+          ),
         ),
-      ),
-    );
+      );
+    } on DioException catch (e) {
+      debugPrint("QR USER LOOKUP ERROR: $e");
+
+      if (!mounted) return;
+
+      setState(() => _scanned = false);
+
+      _showAlert(
+        "User not found",
+        "We couldn't find this NextPay account. Please check the QR code and try again.",
+      );
+    } catch (e) {
+      debugPrint("QR SCAN ERROR: $e");
+
+      if (!mounted) return;
+
+      setState(() => _scanned = false);
+
+      _showAlert(
+        "Something went wrong",
+        "Unable to load the receiver profile. Please try again.",
+      );
+    }
   }
 
   Future<void> _pickFromGallery() async {
