@@ -17,17 +17,44 @@ router.post("/login", loginUser);
 router.post("/send-otp", sendLoginOtp);
 router.post("/verify-otp", verifyLoginOtp);
 router.get("/profile", authMiddleware, getProfile);
-router.get("/users/by-phone/:phone", authMiddleware, async (req, res) => {
-  try {
-    let phone = req.params.phone.trim();
+// router.get("/users/by-phone/:phone", authMiddleware, async (req, res) => {
+//   try {
+//     let phone = req.params.phone.trim();
 
-    // If user enters without +91, add it
-    if (!phone.startsWith("+91")) {
-      phone = `+91${phone}`;
-    }
+//     // If user enters without +91, add it
+//     if (!phone.startsWith("+91")) {
+//       phone = `+91${phone}`;
+//     }
+
+//     const user = await prisma.user.findUnique({
+//       where: { phone },
+//       select: {
+//         id: true,
+//         name: true,
+//         phone: true,
+//       },
+//     });
+
+//     if (!user) {
+//       return res.status(404).json({
+//         message: "User not found",
+//       });
+//     }
+
+//     res.status(200).json(user);
+//   } catch (error) {
+//     console.log("FIND USER ERROR:", error);
+//     res.status(500).json({
+//       message: "Server Error",
+//     });
+//   }
+// });
+router.get("/users/by-id/:id", authMiddleware, async (req, res) => {
+  try {
+    const userId = req.params.id.trim();
 
     const user = await prisma.user.findUnique({
-      where: { phone },
+      where: { id: userId },
       select: {
         id: true,
         name: true,
@@ -41,10 +68,11 @@ router.get("/users/by-phone/:phone", authMiddleware, async (req, res) => {
       });
     }
 
-    res.status(200).json(user);
+    return res.status(200).json(user);
   } catch (error) {
-    console.log("FIND USER ERROR:", error);
-    res.status(500).json({
+    console.error("FIND USER BY ID ERROR:", error);
+
+    return res.status(500).json({
       message: "Server Error",
     });
   }

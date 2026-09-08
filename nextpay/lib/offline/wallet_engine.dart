@@ -1,3 +1,11 @@
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+import '../models/user.dart';
+import '../providers/auth_provider.dart';
+
 class WalletEngine {
   final AuthProvider authProvider;
 
