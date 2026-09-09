@@ -50,11 +50,22 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _loadProfileImage();
-    _loadRecentTransactions();
+
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await context.read<AuthProvider>().fetchWallet();
-      if (mounted) setState(() => _walletLoading = false);
+      final auth = context.read<AuthProvider>();
+
+      await auth.fetchWallet();
+
+      if (!mounted) return;
+
+      await Future.wait([
+        _loadProfileImage(),
+        _loadRecentTransactions(),
+      ]);
+
+      if (mounted) {
+        setState(() => _walletLoading = false);
+      }
     });
     _connSub = Connectivity().onConnectivityChanged.listen((results) {
       final online = results.any((r) => r != ConnectivityResult.none);
@@ -68,11 +79,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String? _resolveUserId(AuthProvider auth) {
     final user = auth.user;
-    if (user == null) return null;
-    final walletUserId = user.wallet?.extra['user_id'];
-    if (walletUserId != null) return walletUserId.toString();
-    final userIdExtra = user.extra['user_id'];
-    if (userIdExtra != null) return userIdExtra.toString();
+    if (user == null || user.id.isEmpty) return null;
     return user.id;
   }
 
@@ -211,8 +218,9 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     }
 
+    await auth.fetchWallet();
+
     await Future.wait([
-      auth.fetchWallet(),
       _loadProfileImage(),
       _loadRecentTransactions(),
     ]);
@@ -288,10 +296,11 @@ class _HomeScreenState extends State<HomeScreen> {
       MaterialPageRoute(builder: (_) => screen),
     );
 
-    await _loadProfileImage();
-
-    // Always refresh wallet after returning
+    // Refresh wallet first so the current account is ready.
     await context.read<AuthProvider>().fetchWallet();
+
+    // Then load this account's profile image.
+    await _loadProfileImage();
 
     if (mounted) {
       setState(() {});
