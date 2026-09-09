@@ -9,15 +9,16 @@ import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:gal/gal.dart';
 import 'dart:convert';
 import '../services/offline_wallet_service.dart';
 import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
 import '../app_colors.dart';
 import '../models/wallet.dart';
+import '../services/offline_wallet_service.dart';
 import 'home_screen.dart';
 import 'scanner_screen.dart';
-import 'package:gal/gal.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -28,217 +29,115 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   final ScreenshotController _screenshotController = ScreenshotController();
+  // Dedicated controller backed by an always-mounted (offstage) widget so
+  // "Share QR code" works from the profile list row too, not only from
+  // inside the full-screen QR viewer where a Screenshot widget happens
+  // to be on screen.
+  final ScreenshotController _shareCaptureController = ScreenshotController();
   final ImagePicker _imagePicker = ImagePicker();
   File? _profileImage;
 
-  String _profileImageKey(String userId) =>
-    'profile_image_path_$userId';
+  static const _prefKey = 'profile_image_path';
 
-String _profileImageFile(String userId, String extension) =>
-    'profile_photo_$userId.$extension';
-
-  Future<String?> _currentUserId() async {
-    final auth = context.read<AuthProvider>();
-    return auth.user?.id;
-  }
   @override
   void initState() {
     super.initState();
     _loadSavedImage();
   }
-  // -----------------------------------------------------------------------------------------------------------------
-
-  // -----------------------------------------------------------------------------------------------------------------
 
   // ── Persistence / image handling (unchanged logic) ─────────────────────
 
   Future<void> _loadSavedImage() async {
-    final userId = await _currentUserId();
-
-    if (userId == null || userId.isEmpty) {
-      return;
-    }
-
     final prefs = await SharedPreferences.getInstance();
-
-    final path = prefs.getString(
-      _profileImageKey(userId),
-    );
-
-    if (path == null || path.isEmpty) {
-      return;
-    }
-
-    final file = File(path);
-
-    if (await file.exists()) {
-      if (mounted) {
-        setState(() {
-          _profileImage = file;
-        });
+    final path = prefs.getString(_prefKey);
+    if (path != null) {
+      final file = File(path);
+      if (await file.exists()) {
+        setState(() => _profileImage = file);
+      } else {
+        await prefs.remove(_prefKey);
       }
-    } else {
-      await prefs.remove(_profileImageKey(userId));
     }
   }
 
-  Future<void> _saveImagePath(
-      String userId,
-      String path,
-      ) async {
+  Future<void> _saveImagePath(String path) async {
     final prefs = await SharedPreferences.getInstance();
-
-    await prefs.setString(
-      _profileImageKey(userId),
-      path,
-    );
+    await prefs.setString(_prefKey, path);
   }
 
-  Future<void> _clearImagePath(String userId) async {
-    if (userId.isEmpty) return;
-
+  Future<void> _clearImagePath() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_profileImageKey(userId));
+    await prefs.remove(_prefKey);
   }
 
-  Future<File> _persistImage(
-      File tempFile,
-      String userId,
-      ) async {
+  Future<File> _persistImage(File tempFile) async {
     final appDir = await getApplicationDocumentsDirectory();
-
-    final extension =
-    tempFile.path.toLowerCase().endsWith('.png')
-        ? 'png'
-        : 'jpg';
-
-    final permanent = File(
-      '${appDir.path}/${_profileImageFile(userId, extension)}',
-    );
-
+    final permanent = File('${appDir.path}/profile_photo.jpg');
     return tempFile.copy(permanent.path);
   }
 
-  // Future<void> _handleShare() async {
-  //   try {
-  //     final imageBytes = await _screenshotController.capture();
-  //     if (imageBytes == null) return;
-  //     final dir = await getTemporaryDirectory();
-  //     final file = File('${dir.path}/offlinepay_qr.png');
-  //     await file.writeAsBytes(imageBytes);
-  //
-  //     final size = MediaQuery.of(context).size;
-  //     final rect = Rect.fromCenter(
-  //       center: Offset(size.width / 2, size.height * 0.75),
-  //       width: 200,
-  //       height: 50,
-  //     );
-  //
-  //     await Share.shareXFiles(
-  //       [XFile(file.path)],
-  //       text: 'Scan to pay me',
-  //       sharePositionOrigin: rect,
-  //     );
-  //   } catch (e) {
-  //     debugPrint("Share error: $e");
-  //   }
-  // }
   Future<void> _handleShare() async {
     try {
-      final imageBytes =
-      await _screenshotController.capture(
-        pixelRatio: 3.0,
-      );
-
+      // Always capture from the hidden, always-mounted widget below rather
+      // than _screenshotController, which only has something to capture
+      // while the full-screen QR viewer happens to be open. This is why
+      // the old "Share QR code" row on this screen silently did nothing.
+      final imageBytes = await _shareCaptureController.capture();
       if (imageBytes == null) {
-        throw Exception(
-          'Unable to generate QR image',
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Couldn't prepare QR code to share")),
+          );
+        }
+        return;
       }
 
       final dir = await getTemporaryDirectory();
-
       final file = File(
-        '${dir.path}/nextpay_qr.png',
+        '${dir.path}/nextpay_qr_share_${DateTime.now().millisecondsSinceEpoch}.png',
       );
+      await file.writeAsBytes(imageBytes);
 
-      await file.writeAsBytes(
-        imageBytes,
-        flush: true,
-      );
-
-      if (!await file.exists()) {
-        throw Exception(
-          'QR file was not created',
-        );
-      }
+      if (!mounted) return;
 
       final size = MediaQuery.of(context).size;
-
       final rect = Rect.fromCenter(
-        center: Offset(
-          size.width / 2,
-          size.height * 0.75,
-        ),
+        center: Offset(size.width / 2, size.height * 0.75),
         width: 200,
         height: 50,
       );
 
-      await Share.shareXFiles(
+      final result = await Share.shareXFiles(
         [XFile(file.path)],
-        text: 'Scan to pay me using NextPay',
+        text: 'Scan to pay me on NextPay',
         sharePositionOrigin: rect,
       );
-    } catch (e, stack) {
-      debugPrint(
-        'QR SHARE ERROR: $e\n$stack',
-      );
 
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Unable to share QR code. Please try again.',
-          ),
-        ),
-      );
+      if (result.status == ShareResultStatus.dismissed) {
+        debugPrint("Share sheet dismissed by user");
+      }
+    } catch (e) {
+      debugPrint("Share error: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Couldn't share QR code. Try again.")),
+        );
+      }
     }
   }
 
   Future<void> _pickImage(ImageSource source) async {
     try {
-      final auth = context.read<AuthProvider>();
-      final userId = auth.user?.id;
-
-      if (userId == null || userId.isEmpty) {
-        return;
-      }
-
-      final picked = await _imagePicker.pickImage(
+      final XFile? picked = await _imagePicker.pickImage(
         source: source,
         imageQuality: 85,
         maxWidth: 512,
         maxHeight: 512,
       );
-
       if (picked == null) return;
-
-      final permanent = await _persistImage(
-        File(picked.path),
-        userId,
-      );
-
-      await _saveImagePath(
-        userId,
-        permanent.path,
-      );
-
-      if (mounted) {
-        setState(() {
-          _profileImage = permanent;
-        });
-      }
+      final permanent = await _persistImage(File(picked.path));
+      await _saveImagePath(permanent.path);
+      setState(() => _profileImage = permanent);
     } catch (e) {
       debugPrint("Image pick error: $e");
     }
@@ -250,69 +149,9 @@ String _profileImageFile(String userId, String extension) =>
         if (await _profileImage!.exists()) await _profileImage!.delete();
       } catch (_) {}
     }
-    final auth = context.read<AuthProvider>();
-    final userId = auth.user?.id ?? '';
-    await _clearImagePath(userId);
+    await _clearImagePath();
     setState(() => _profileImage = null);
   }
-
-  Future<void> _handleDownloadQr() async {
-  try {
-    final imageBytes =
-        await _screenshotController.capture(
-      pixelRatio: 3.0,
-    );
-
-    if (imageBytes == null) {
-      throw Exception('Unable to generate QR image');
-    }
-
-    final hasAccess = await Gal.hasAccess();
-
-    if (!hasAccess) {
-      final granted = await Gal.requestAccess();
-
-      if (!granted) {
-        throw Exception(
-          'Gallery permission denied',
-        );
-      }
-    }
-
-    final dir = await getTemporaryDirectory();
-
-    final file = File(
-      '${dir.path}/nextpay_qr_${DateTime.now().millisecondsSinceEpoch}.png',
-    );
-
-    await file.writeAsBytes(imageBytes);
-
-    await Gal.putImage(
-      file.path,
-      album: 'NextPay',
-    );
-
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('QR code saved to your gallery'),
-      ),
-    );
-  } catch (e) {
-    debugPrint('QR DOWNLOAD ERROR: $e');
-
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Could not save QR code: $e',
-        ),
-      ),
-    );
-  }
-}
 
   Future<void> _handleLogout() async {
     final auth = context.read<AuthProvider>();
@@ -750,13 +589,7 @@ String _profileImageFile(String userId, String extension) =>
         .toUpperCase();
     final initialsShort = initials.length > 2 ? initials.substring(0, 2) : initials;
 
-    final qrValue = jsonEncode({
-      "type": "nextpay",
-      "version": 1,
-      "userId": userId,
-      "receiverName": userName,
-      // "receiverPhone": user?.phone ?? "",
-    });
+    final qrValue = jsonEncode({"userId": userId, "receiverName": userName});
     final walletBalance = user?.wallet?.balance ?? 0;
     final lockedBalance = user?.wallet?.lockedBalance ?? 0;
 
@@ -819,6 +652,79 @@ String _profileImageFile(String userId, String extension) =>
                   ),
                 ),
               ],
+            ),
+          ),
+
+          // ── HIDDEN SHARE CAPTURE TARGET ───────────────────────────────
+          // Rendered off-screen at all times (not just while the full QR
+          // viewer is open) so the "Share QR code" row works no matter
+          // where it's tapped from.
+          Offstage(
+            offstage: true,
+            child: Screenshot(
+              controller: _shareCaptureController,
+              child: Material(
+                color: Colors.white,
+                child: Container(
+                  width: 320,
+                  padding: const EdgeInsets.all(24),
+                  color: Colors.white,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: const BoxDecoration(
+                              color: Color(0xFF534AB7),
+                              shape: BoxShape.circle,
+                            ),
+                            clipBehavior: Clip.antiAlias,
+                            child: _profileImage != null
+                                ? Image.file(_profileImage!, fit: BoxFit.cover)
+                                : Center(
+                              child: Text(
+                                initialsShort,
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              userName,
+                              style: const TextStyle(
+                                  color: Color(0xFF1A1A1A),
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      QrImageView(
+                        data: qrValue.isNotEmpty ? qrValue : "empty",
+                        size: 220,
+                        backgroundColor: Colors.white,
+                        eyeStyle: const QrEyeStyle(color: Color(0xFF1A1A1A)),
+                        dataModuleStyle:
+                        const QrDataModuleStyle(color: Color(0xFF1A1A1A)),
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        "Scan to pay with NextPay app",
+                        style: TextStyle(fontSize: 12, color: Color(0xFF6B6B6B)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ),
 
@@ -1283,16 +1189,67 @@ class _QrCodeScreen extends StatelessWidget {
   Future<void> _handleDownload(BuildContext context) async {
     try {
       final imageBytes = await screenshotController.capture();
-      if (imageBytes == null) return;
-      final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/nextpay_qr_${DateTime.now().millisecondsSinceEpoch}.png');
-      await file.writeAsBytes(imageBytes);
+      if (imageBytes == null) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Couldn't capture QR code")),
+          );
+        }
+        return;
+      }
+
+      // getApplicationDocumentsDirectory() is the app's PRIVATE sandbox —
+      // it never shows up in Photos/Gallery/Files, which is why the old
+      // code showed "QR code saved" but the file was never visible to the
+      // user. We need to write into the device's public media store.
+      final hasAccess = await Gal.hasAccess();
+      if (!hasAccess) {
+        final granted = await Gal.requestAccess();
+        if (!granted) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  "Storage/Photos permission is needed to save the QR code",
+                ),
+              ),
+            );
+          }
+          return;
+        }
+      }
+
+      // Write to a temp file first (Gal.putImage needs a file path), then
+      // hand it off to the gallery.
+      final tempDir = await getTemporaryDirectory();
+      final tempFile = File(
+        '${tempDir.path}/nextpay_qr_${DateTime.now().millisecondsSinceEpoch}.png',
+      );
+      await tempFile.writeAsBytes(imageBytes);
+
+      await Gal.putImage(tempFile.path, album: "NextPay");
+
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("QR code saved"), duration: Duration(seconds: 1)),
+        const SnackBar(
+          content: Text("QR code saved to gallery"),
+          duration: Duration(seconds: 2),
+        ),
       );
+    } on GalException catch (e) {
+      debugPrint("Gal save error: ${e.type} ${e.platformException}");
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Couldn't save QR code to gallery")),
+        );
+      }
     } catch (e) {
       debugPrint("Download error: $e");
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Couldn't save QR code")),
+        );
+      }
     }
   }
 

@@ -32,6 +32,8 @@
 		<string>To take a profile photo</string>
 		<key>NSPhotoLibraryUsageDescription</key>
 		<string>To set your profile photo</string>
+		<key>NSPhotoLibraryAddUsageDescription</key>
+		<string>To save your QR code to your photo library</string>
 		<key>UIApplicationSceneManifest</key>
 		<dict>
 			<key>UIApplicationSupportsMultipleScenes</key>
